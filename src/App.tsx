@@ -1,17 +1,18 @@
-// 应用根组件 · 摆件装配点（4-1 批次 2 接上 <HeiCat/>）
+// 应用根组件 · 摆件装配点（4-1 批次 2 接上 <HeiCat/>，批次 3 接上 M5 的 60Hz 跟随）
 //
-// 为什么现在只有一只猫、没有交互：这个组件的全部内容就是"把角色与三个交互 hook 拼起来"，
-// 而那些模块按 `DESIGN.md` §10 的批次表分别在批次 3（`interaction/useCursorFollow`）与
-// 批次 4（`interaction/usePointerPassthrough` 与 `interaction/useDragExit`）落地。
-// 批次 2 先把造型接上 —— 窗口里第一次有东西可看，M3 的目视判据（SCOPE §10 Q2：判"像不像"的是用户）
-// 从这一批起才有对象；此时拖拽、右键退出、瞳孔跟随都还没有（那是批次 3/4）。
-// ceiling: 猫是静态的 —— 形态、比例、配色到位，但不会呼吸/眨眼/甩尾，瞳孔不跟随，透明区不穿透
-// upgrade: 批次 3 接 useCursorFollow 并把 gazeDeg 传给瞳孔；批次 4 接 usePointerPassthrough 与 useDragExit 的鼠标事件
+// 为什么这里只有三行：本组件的全部内容就是"把角色与三个交互 hook 拼起来"，接线本身不该长逻辑——
+// 角度与幅度由 `interaction/gaze.ts` 的纯函数算，取样由 `interaction/useCursorFollow.ts`（唯一 60Hz 定时器）
+// 做，位移由 `character/geometry.ts` 换算成设计坐标，这里只负责把值传下去。
+// 批次 4 再接 `interaction/usePointerPassthrough`（消费本批已产出的 `cursorScreen`）与 `interaction/useDragExit`。
+// ceiling: 没有拖拽、没有右键退出、透明区也不穿透（批次 4）——本批能演示的是"猫会呼吸/眨眼/甩尾 + 瞳孔跟着鼠标转"
+// upgrade: 批次 4 接 usePointerPassthrough(cursorScreen, scaleFactor) 与 useDragExit 的 onMouseDown / onContextMenu
 import "./App.css";
 import HeiCat from "./character/HeiCat.tsx";
+import { useCursorFollow } from "./interaction/useCursorFollow.ts";
 
 function App() {
-  return <HeiCat />;
+  const { gazeDeg, gazeTravel } = useCursorFollow(true);
+  return <HeiCat gazeDeg={gazeDeg} gazeTravel={gazeTravel} />;
 }
 
 export default App;

@@ -78,6 +78,26 @@ const PUPILS: [Ellipse, Ellipse] = [
   { cx: EYE_WHITES[1].cx + PUPIL_DX, cy: EYE_CY + PUPIL_DY, rx: 32, ry: 41 },
 ];
 
+/**
+ * 瞳孔能走多远（SCOPE §7 元素表原文："距中心最大偏移 = 眼白短半径的 45%"）。
+ * 眼白短半径 = `ry` = 52 → 满偏 23.4（设计坐标）；乘上 `gazeTravel`（0~1）才是实时位移。
+ */
+export const PUPIL_TRAVEL_RATIO = 0.45;
+
+/**
+ * M5：把（角度 0~±180°，幅度 0~1）换算成瞳孔相对**静态姿态**的位移（设计坐标 px）。
+ * 为什么静态姿态不进返回值：瞳孔的 `(+2,+4)` 已经烘进 `CAT_GEOMETRY.pupils` 的 cx/cy，
+ * 这里只回答"从静态姿态再走多远"——位移 0 就是回正（SCOPE §5 M5 的"瞳孔回到正中"）。
+ * 非有限输入一律当 0：SCOPE U3 禁 `rotate(NaN)`，同理这里不许产出 `translate(NaN)`。
+ */
+export function pupilOffsetFor(gazeDeg: number, gazeTravel: number): Point {
+  const deg = Number.isFinite(gazeDeg) ? gazeDeg : 0;
+  const travel = Number.isFinite(gazeTravel) ? Math.min(1, Math.max(0, gazeTravel)) : 0;
+  const radius = PUPIL_TRAVEL_RATIO * EYE_RY * travel;
+  const rad = (deg * Math.PI) / 180;
+  return { x: radius * Math.cos(rad), y: radius * Math.sin(rad) };
+}
+
 /** 椭圆写成 `<path>`：SCOPE §7 元素表指定眼睑是 `<path>`（两段 180° 弧，不是 `<ellipse>`）。 */
 const ellipsePathD = (e: Ellipse): string =>
   `M${fmt(e.cx - e.rx)} ${fmt(e.cy)} A ${fmt(e.rx)} ${fmt(e.ry)} 0 1 0 ${fmt(e.cx + e.rx)} ${fmt(e.cy)} A ${fmt(e.rx)} ${fmt(e.ry)} 0 1 0 ${fmt(e.cx - e.rx)} ${fmt(e.cy)} Z`;

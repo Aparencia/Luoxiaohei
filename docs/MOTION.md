@@ -72,7 +72,7 @@
 
 ## 8. 降级两条（缺一条 = 本卡未完成）
 - 正向前置：三条 `@keyframes` 与 `animation` 声明**只写在** `@media (prefers-reduced-motion: no-preference) { … }` 内——只写 `reduce` 分支会漏掉将来内联样式或第三方组件里的动效。
-- `reduce` 分支（本项目实例，4-1 照写）：`@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 150ms !important; animation-iteration-count: 1 !important; transition-duration: 150ms !important; scroll-behavior: auto !important; } #body, .eyelid, .tail { transform: none !important; } }`——循环**真停**（`iteration-count: 1` 是卡的兜底；`transform: none !important` 是 author `!important`，按层叠序胜过动画原点，三条直接停在静态姿态）；位移 / 缩放 / 旋转**塌缩为静止**（不换透明度：这三条不承载任何状态，换透明度反而新增一个闪烁源）。
+- `reduce` 分支（本项目实例，4-1 批次 3 已照写并按实测**修正两处**）：`@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 150ms !important; animation-iteration-count: 1 !important; transition-duration: 150ms !important; scroll-behavior: auto !important; } #body, .hei-tail { transform: none !important; } .hei-eyelid { transform: scaleY(0) !important; } }`——循环**真停**（`iteration-count: 1` 是卡的兜底；`transform` 上的 author `!important` 按层叠序胜过动画原点，三条直接停在静态姿态）；位移 / 缩放 / 旋转**塌缩为静止**（不换透明度：这三条不承载任何状态，换透明度反而新增一个闪烁源）。**两处与卡内模板原文的必要偏离**（4-1 批次 3 实测，选择器以 `src/character/heicat.css` 为准）：① 选择器必须写本项目真实的类名——模板原文的 `.eyelid` / `.tail` 在本项目**不存在**，照抄等于没选中；② 眼睑的静态姿态是 `scaleY(0)` 而**不是** `none`——写成 `none` 会让眼睑铺满整只眼，即"减少动效"的用户永远看到一只闭着眼的猫。两者都有 `motion.test.ts` 的 M4·② 兜着。
 - 功能零缺失：瞳孔跟随 M5 是 60Hz 状态更新、**不是动画**，`reduce` 下不降级（选择器也不含瞳孔）；拖拽 / 右键 / 穿透三条判据不变，动效期间窗口照常可点可拖。
 
 ## 9. 性能预算（超了就是 bug，不是"稍慢"）

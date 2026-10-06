@@ -192,7 +192,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File gate.ps1 -Anchor HEAD~1 -Sco
 | # | 改坏哪一行（人工制造） | 必须变红的用例 |
 | :-- | :-- | :-- |
 | MUT-1 | `SAMPLE_HZ` 60 → 30 | `gaze.test.ts` 的采样常量断言 **+** KP-12 的"单 tick 单次采样"断言 |
-| MUT-2 | `gazeAngle` 去掉 −180~180 夹取 | `gaze.test.ts` 的夹取与 `NaN` 用例（KP-08） |
+| MUT-2 | `gaze.ts` 的 `gazeAngle` 去掉"距离必须有限"那句守卫（`!Number.isFinite(dist)`） | `gaze.test.ts` 的 `NaN` / `Infinity` 用例（KP-08 后半，M5·⑧）——4-1 批次 3 实测：删掉它 `NaN` 输入会产出 `NaN`、M5·⑧ 红。**原文写的是"去掉 −180~180 夹取"，实测那句删除后全绿**：`atan2` 的值域本来就是 (−180, 180]，夹取不可达（保留它只是为了把输出契约写在返回处）。口径已按实测改为"守卫"，夹取行不再是变异体 |
 | MUT-3 | `heicat.css` 呼吸周期 3.2s → 1.6s | `motion.test.ts` 的周期断言 |
 | MUT-4 | `heicat.css` 把 `transform` 改成 `width` | `motion.test.ts` 的合成层断言（KP-06） |
 | MUT-5 | `tauri.conf.json` 的 `transparent` → `false` | `tauriConfig.test.ts` 的 `window-config` 用例 |
