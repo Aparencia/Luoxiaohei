@@ -9,7 +9,7 @@
 #   Python: $STEPS = @('python -m mypy .', 'python -m pytest -q')
 chcp 65001 > $null
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$STEPS = @('git status --porcelain','powershell -NoProfile -File security.ps1')   # 1-2 卡零依赖占位；4-1 卡第一批代码落盘后必须换成本项目真实的 typecheck/lint/test 命令
+$STEPS = @('npm run typecheck','npm run test','git status --porcelain','powershell -NoProfile -File security.ps1')   # 4-1 批次 1（M8）换成真实命令；顺序即 SCOPE §5 M8 的验收输出顺序。⚠️ `npm run test` 内部必须用 glob——`node --test <目录>` 在 Node v24.21.0 上退出码 1（假红，见 docs/lessons/2026-10-06_node-test传目录假红.md）
 
 # --- 结构断言：与 STEPS 无关，先跑（orphans 工具在位 + 文件数预算）---
 # 文件数口径同 orphans.ps1：优先 git ls-files（-c core.quotepath=false，中文名不被转义成八进制串）；
