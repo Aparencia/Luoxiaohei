@@ -40,11 +40,11 @@
 | 跟随断言（**待建**） | "查眼珠转得对不对" | — | src/interaction/gaze.test.ts | `SAMPLE_HZ === 60` | SCOPE M5 的验收命令载体；N/A；N/A | 2026-10-06 |
 | 穿透断言（**待建**） | "查命中判定对不对" | — | src/interaction/hitTest.test.ts | `scaleFactor` | SCOPE M6 的验收命令载体；N/A；N/A | 2026-10-06 |
 | 拖拽退出断言（**待建**） | "查拖拽和右键发出的是哪条命令" | — | src/interaction/dragExit.test.ts | `mockIPC` | SCOPE M7 的验收命令载体；N/A；N/A | 2026-10-06 |
-| 窗口本体（**待改**） | "那只猫所在的框" | — | src-tauri/tauri.conf.json | `alwaysOnTop` | 改 8 键：260×300 / transparent / decorations:false / alwaysOnTop / skipTaskbar / **shadow:false** / **`resizable:false`** / **`maximizable:false`**（后两键 3-4 卡追加，断言第二行 `window-lock OK 2/2`）；被 tauriConfig.test.ts 读（1 处） | 2026-10-06 |
-| 权限清单（**待改**） | "它被允许干什么" | — | src-tauri/capabilities/default.json | `allow-set-ignore-cursor-events` | permissions 2 → 5 条，**删 `opener:default`**；APIS.md 的 I1~I3、I7 全依赖它 | 2026-10-06 |
+| 窗口本体（**批次 0 已落**） | "那只猫所在的框" | — | src-tauri/tauri.conf.json | `alwaysOnTop` | **8 键已落**（260×300 / `transparent:true` / `decorations:false` / `alwaysOnTop:true` / `skipTaskbar:true` / `shadow:false` / `resizable:false` / `maximizable:false`；`minimizable` 保持默认 `true`）；被 src/tauriConfig.test.ts 读（1 处，批次 1 建） | 2026-10-06 |
+| 权限清单（**批次 0 部分落**） | "它被允许干什么" | — | src-tauri/capabilities/default.json | `allow-set-ignore-cursor-events` | 现 **3** 条（`core:default` / `opener:default` / `core:window:allow-set-ignore-cursor-events`——第 3 条是批次 0 为 A3 实验加的）；**批次 1 落终值 5 条并删 `opener:default`**；APIS.md 的 I1~I3、I7 全依赖它 | 2026-10-06 |
 | Rust 逻辑入口（**待改**） | "窗口与命令都在这" | `run` | src-tauri/src/lib.rs | `tauri::Builder` | 删 `greet` 命令与注册（3 处）；删 `tauri_plugin_opener` 注册（1 处）；窗口构建不动 | 2026-10-06 |
 | 应用根组件（**待改**） | "整个界面" | `App` | src/App.tsx | `HeiCat` | 整份替换（脚手架演示页 → 摆件装配）；引用 HeiCat + 三个 hook（4 处） | 2026-10-06 |
-| 全局样式（**待改**） | "窗口的底色与定位" | — | src/App.css | `background` | 整份替换：删脚手架样式（含 `#greet-input`）；只留 html/body 全透明 + 100% 尺寸 + 禁滚动；**3-4 卡已就地删掉模板自带的 `input,button{outline:none}` 4 行**（动作 12「命中 0」的唯一源码阻碍） | 2026-10-06 |
+| 全局样式（**批次 0 部分改 / 批次 1 整份替换**） | "窗口的底色与定位" | — | src/App.css | `background` | 批次 0 把两处 `:root` 背景改成 `transparent`（A3 实验需要可见的透明像素，否则整页 `#f6f6f6` 填满客户区、根本无从取样；该文件本就是批次 1 的整份替换对象）；批次 1 定为：删脚手架样式、只留 `html/body` 全透明 + 100% 尺寸 + 禁滚动；**3-4 卡已就地删掉模板自带的 `input,button{outline:none}` 4 行** | 2026-10-06 |
 | 收工门禁（**待改**） | "查完成没完成的那条命令" | `$STEPS` | check.ps1 | `npm run typecheck` | `$STEPS` 从 2 条占位换 4 条：typecheck / test / git status / security；结构断言段不动 | 2026-10-06 |
 
 <!-- 4-1 每批落地后把上表的「待建 / 待改」去掉，并删掉本节与「应用外壳」节里重复的行（D11：被取代的登记行同批删） -->
