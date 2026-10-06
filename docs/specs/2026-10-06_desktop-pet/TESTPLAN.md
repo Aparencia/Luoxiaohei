@@ -14,7 +14,7 @@
 | 类型检查 | `npm run typecheck` = `tsc --noEmit`；测试文件的 import **必须带 `.ts` 扩展名**（`tsconfig` 已开 `allowImportingTsExtensions`，本轮实测 `node -v` = v24.21.0） |
 | 测试文件落点 | 与被测模块同目录、同名前缀 `*.test.ts`（`ARCHITECTURE.md` §4「测试文件」行） |
 | "通过"的定义 | 每条命令的判据 = **退出码 0 + 可比对输出**（如 `window-config OK 6/6`）；"跑过了"不算（AGENTS.md B1） |
-| 现状（本轮实测） | `src/**/*.test.ts` 命中 **0** 个文件；`package.json` 的 scripts 只有 `dev`/`build`/`preview`/`tauri`，**没有 `typecheck`/`test`**——两条由 4-1 批次 1 补（原文钉在 `DESIGN.md` §3.6） |
+| 现状（本轮实测） | `src/**/*.test.ts` 命中 **0** 个文件；`package.json` 的 scripts 只有 `dev`/`build`/`preview`/`tauri`，**没有 `typecheck`/`test`**——两条由 4-1 批次 1 补（原文钉在 `DESIGN.md` §3.6）｜`@tauri-apps/api` 已装 **v2.12.1**，`mocks.js` / `mocks.d.ts` 在位，但 `mockIPC` 在 Node 里需要一行 `window` 垫片（**实测见 §7**） |
 
 ## 1. 动作 1 · 金字塔三层分配
 
@@ -168,11 +168,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File gate.ps1 -Anchor HEAD~1 -Sco
 
 | 被测物 | 允许被替换 / 打桩吗 | 怎么替换 |
 | :-- | :-- | :-- |
-| `@tauri-apps/api/core` 的 `invoke` | **允许，且是唯一允许的替换点** | `@tauri-apps/api/mocks` 的 `mockIPC`（`dragExit.test.ts` 专用） |
+| `@tauri-apps/api/core` 的 `invoke` | **允许，且是唯一允许的替换点** | `@tauri-apps/api/mocks` 的 `mockIPC` + **每个用它的文件顶部必须加一行 `window` 垫片**（见下方实测表第 2 行） |
 | `gazeAngle` / `screenToViewport` / `isOverCharacter` / `CAT_GEOMETRY` | **不替换** | 直接调真实现——它们本来就是纯函数，替换掉等于没测 |
 | `heicat.css` / `tauri.conf.json` / `capabilities/default.json` | **不替换，也不许在测试里内联一份"期望副本"** | 读**真实文件文本**。内联副本 = 同义反复（改坏真文件测试照样绿） |
 | `setInterval` 定时器 | 不 mock 真实时钟；需要"跑一个 tick"时用受控时间（`node:test` 的 timer mock），**禁止固定 sleep** | KP-12 用受控时间推进一个 tick，等待一律写成"轮询条件 + 明确超时" |
 | `currentMonitor()` / `cursorPosition()` 的系统返回值 | 允许以 payload 形式注入给纯函数 | 纯函数只吃数字参数，系统值由 hook 层取——这层分工由 `ARCHITECTURE.md` §5 的模块约束保证 |
+
+**接缝已实测（2026-10-06 本轮，`node --test "src/**/*.test.ts"` 实跑；探针文件跑完即删，工作树未留副本）**
+
+| # | 探针 | 实测结果 | 对策略的影响 |
+| --: | :-- | :-- | :-- |
+| 1 | 直接 `mockIPC(...)` | ✖ **`ReferenceError: window is not defined`**（`@tauri-apps/api/mocks.js:6` 的 `mockInternals()` 直接读 `window`） | **SCOPE M7 的验收命令照原样写跑不起来**——`@tauri-apps/api` v2.12.1 明确假设浏览器环境（其 JSDoc 示例是 Vitest） |
+| 2 | 先 `(globalThis as unknown as { window: unknown }).window = globalThis` 再 `mockIPC` | ✔ `invoke('plugin:window\|cursor_position')` 返回 mock 值，回调收到的 cmd 逐字正确 | **KP-10~KP-12 成立**；这行垫片**是接缝约定的一部分**，每个用 `mockIPC` 的测试文件顶部都要写，不许各自发明写法 |
+| 3 | 不 mock 直接 `invoke(...)` | ✔ 抛错（Promise reject） | **KP-13 / KP-14 的失败分支可测**：`E-IPC-01` 用"mock 回调里 throw"构造，`E-IPC-02` 用"mock 返回 `null`"构造 |
+| 4 | `t.mock.timers.enable({ apis: ['setInterval'] })` + `tick(16)` | ✔ 回调恰好触发 1 次 | **KP-12 的"跑一个 tick"可受控驱动**——不需要 sleep，也不需要新依赖（Node 24 内置） |
 
 **两种反模式（收工前逐条自查）**
 1. **同义反复测试**：断言重抄实现。判据一句话：这条测试说得出"改哪一行生产代码会让它变红"吗？**本卡已点出两处高危**——`SAMPLE_HZ === 60`（NFR P3 的验收命令原文就是断言这个常量）与 `window-config OK 6/6` 里的常量比对。二者的处理：常量断言**保留**（它们是 SCOPE/NFR 逐字指定的命令判据），但**必须**各配一条行为断言——KP-12（单 tick 单次采样 + 未翻转不 invoke）与 KP-03（每条授权都能找到调用方）。只留常量断言的用例 = 不合格。
