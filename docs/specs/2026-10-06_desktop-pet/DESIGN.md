@@ -144,7 +144,7 @@ I7  req(menu|new) {"kind":"Menu","options":{"items":[…]},"handler":<Channel>} 
 
 > 本项目**不使用** 9xxx 占位错误码通道（那是"本期不实现但契约先行的 HTTP 占位接口"专用）；无 HTTP → 无 503 语义。
 
-### 3.4 窗口配置（M1 的六个键，逐键给终值）
+### 3.4 窗口配置（M1 的六个键 + 3-4 卡追加的 2 个尺寸锁键，逐键给终值）
 
 | 键 | 现在（实测 `src-tauri/tauri.conf.json:15-17`） | 终值 | 依据 |
 | :-- | :-- | :-- | :-- |
@@ -154,6 +154,7 @@ I7  req(menu|new) {"kind":"Menu","options":{"items":[…]},"handler":<Channel>} 
 | `alwaysOnTop` | 未写（默认 false） | **true** | 同上 |
 | `skipTaskbar` | 未写（默认 false） | **true** | 同上 |
 | `shadow` | 未写（**默认 true**） | **false** | RESEARCH **F4** 原文：无边框窗口下 `true` 会产生 1px 白边，Win11 还带圆角 |
+| `resizable` / `maximizable`（**3-4 卡追加**） | 未写（默认 `true` / `true`） | **`false` / `false`** | 3-4 卡：无边框窗口仍可被拖边缘或 Win+Up 改尺寸 → 与 `VIEW_BOX = '0 0 260 300'` 失配，直接破 M6 命中判定与 M3 造型比例。`minimizable` **保持默认 `true`**（NFR A3 的验证动作要"最小化→还原"，关掉它该行就无法验证）。理由与断言落点见 `docs/UI.md` §6：第二行 `window-lock OK 2/2`，M1 原有的 `window-config OK 6/6` 不动 |
 
 ### 3.5 前端模块签名（钉死到函数级，4-1 不再做设计决策）
 
@@ -216,7 +217,7 @@ $STEPS = @('npm run typecheck','npm run test','git status --porcelain','powershe
 
 | 页面 | 界面元素 | 人话标识 | 文件 | 影响面 |
 | :-- | :-- | :-- | :-- | :-- |
-| 单窗口 `main`（无路由） | 窗口本体 | "那只猫所在的框" | `src-tauri/tauri.conf.json` | 改 6 键（§3.4）；被 `src/tauriConfig.test.ts` 读取（1 处）；无其他引用 |
+| 单窗口 `main`（无路由） | 窗口本体 | "那只猫所在的框" | `src-tauri/tauri.conf.json` | 改 6 键 + 3-4 卡追加的 2 个尺寸锁键（§3.4）；被 `src/tauriConfig.test.ts` 读取（1 处）；无其他引用 |
 | 单窗口 `main` | 权限清单 | "它被允许干什么" | `src-tauri/capabilities/default.json` | 改 `permissions`（2 → 5 条，删 `opener:default`）；§3.1 的 I1~I3、I7 全部依赖它；被 `src/tauriConfig.test.ts` 读取（1 处） |
 | 单窗口 `main` | Rust 入口 | "程序真正启动的地方" | `src-tauri/src/lib.rs` | 删 `greet` 命令与 `invoke_handler` 里的注册（**3 处**，`git grep -n greet` 原文）；`tauri::Builder` 窗口构建不动 |
 | 单窗口 `main` | 应用根组件 | "整个界面" | `src/App.tsx` | **整份替换**（脚手架演示页 → 摆件装配）；引用 `HeiCat` + 三个 hook（4 处）；`docs/registry/COMPONENTS.md:11` 已注「当前是脚手架演示页，首个功能会整份替换」 |

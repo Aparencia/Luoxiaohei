@@ -31,7 +31,7 @@
 | 角色动画表（**待建**） | "呼吸眨眼甩尾的节奏" | — | src/character/heicat.css | `@keyframes breathe` | 被 HeiCat.tsx import（1 处）；被 motion.test.ts 按文本解析（1 处）；**只允许合成层属性**（transform/opacity）；N/A；N/A（装饰性动画，`prefers-reduced-motion` 由 3-6 卡定） | 2026-10-06 |
 | 瞳孔跟随（**待建**） | "眼珠跟着鼠标转" | `useCursorFollow` | src/interaction/useCursorFollow.ts | `SAMPLE_HZ` | 被 src/App.tsx 引用（1 处）；**全项目唯一的 60Hz 定时器持有者**；N/A；N/A | 2026-10-06 |
 | 透明区穿透（**待建**） | "点到透明的地方就是点到桌面" | `usePointerPassthrough` | src/interaction/usePointerPassthrough.ts | `setIgnoreCursorEvents` | 被 src/App.tsx 引用（1 处）；零定时器，消费 useCursorFollow 的同一 tick；N/A；N/A | 2026-10-06 |
-| 拖拽与退出（**待建**） | "拖着走 + 右键退出" | `useDragExit` | src/interaction/useDragExit.ts | `startDragging` | 被 src/App.tsx 引用（1 处）；SCOPE S1 位置记忆的唯一改动点；N/A；右键菜单仅一项「退出」，无键盘可达性（原生菜单） | 2026-10-06 |
+| 拖拽与退出（**待建**） | "拖着走 + 右键退出" | `useDragExit` | src/interaction/useDragExit.ts | `startDragging` | 被 src/App.tsx 引用（1 处）；SCOPE S1 位置记忆的唯一改动点；N/A；右键菜单仅一项「退出」；键盘路径 = **Alt+F4**（Windows `WM_CLOSE`，3-4 卡登记，4-3 核） | 2026-10-06 |
 | 瞳孔角度纯函数（**待建**） | "算眼珠该转多少度" | `gazeAngle` | src/interaction/gaze.ts | `SAMPLE_HZ` | 被 useCursorFollow.ts 引用（1 处）；N/A；N/A | 2026-10-06 |
 | 命中判定纯函数（**待建**） | "算鼠标是不是在猫身上" | `screenToViewport` | src/interaction/hitTest.ts | `isOverCharacter` | 被 usePointerPassthrough.ts 引用（1 处）；N/A；N/A | 2026-10-06 |
 | 窗口配置断言（**待建**） | "查窗口配对了没" | — | src/tauriConfig.test.ts | `window-config OK` | SCOPE M1/M2 的验收命令载体；读 tauri.conf.json 与 capabilities/default.json（2 处）；N/A；N/A（测试文件） | 2026-10-06 |
@@ -40,11 +40,11 @@
 | 跟随断言（**待建**） | "查眼珠转得对不对" | — | src/interaction/gaze.test.ts | `SAMPLE_HZ === 60` | SCOPE M5 的验收命令载体；N/A；N/A | 2026-10-06 |
 | 穿透断言（**待建**） | "查命中判定对不对" | — | src/interaction/hitTest.test.ts | `scaleFactor` | SCOPE M6 的验收命令载体；N/A；N/A | 2026-10-06 |
 | 拖拽退出断言（**待建**） | "查拖拽和右键发出的是哪条命令" | — | src/interaction/dragExit.test.ts | `mockIPC` | SCOPE M7 的验收命令载体；N/A；N/A | 2026-10-06 |
-| 窗口本体（**待改**） | "那只猫所在的框" | — | src-tauri/tauri.conf.json | `alwaysOnTop` | 改 6 键：260×300 / transparent / decorations:false / alwaysOnTop / skipTaskbar / **shadow:false**；被 tauriConfig.test.ts 读（1 处） | 2026-10-06 |
+| 窗口本体（**待改**） | "那只猫所在的框" | — | src-tauri/tauri.conf.json | `alwaysOnTop` | 改 8 键：260×300 / transparent / decorations:false / alwaysOnTop / skipTaskbar / **shadow:false** / **`resizable:false`** / **`maximizable:false`**（后两键 3-4 卡追加，断言第二行 `window-lock OK 2/2`）；被 tauriConfig.test.ts 读（1 处） | 2026-10-06 |
 | 权限清单（**待改**） | "它被允许干什么" | — | src-tauri/capabilities/default.json | `allow-set-ignore-cursor-events` | permissions 2 → 5 条，**删 `opener:default`**；APIS.md 的 I1~I3、I7 全依赖它 | 2026-10-06 |
 | Rust 逻辑入口（**待改**） | "窗口与命令都在这" | `run` | src-tauri/src/lib.rs | `tauri::Builder` | 删 `greet` 命令与注册（3 处）；删 `tauri_plugin_opener` 注册（1 处）；窗口构建不动 | 2026-10-06 |
 | 应用根组件（**待改**） | "整个界面" | `App` | src/App.tsx | `HeiCat` | 整份替换（脚手架演示页 → 摆件装配）；引用 HeiCat + 三个 hook（4 处） | 2026-10-06 |
-| 全局样式（**待改**） | "窗口的底色与定位" | — | src/App.css | `background` | 整份替换：删脚手架样式（含 `#greet-input`）；只留 html/body 全透明 + 100% 尺寸 + 禁滚动 | 2026-10-06 |
+| 全局样式（**待改**） | "窗口的底色与定位" | — | src/App.css | `background` | 整份替换：删脚手架样式（含 `#greet-input`）；只留 html/body 全透明 + 100% 尺寸 + 禁滚动；**3-4 卡已就地删掉模板自带的 `input,button{outline:none}` 4 行**（动作 12「命中 0」的唯一源码阻碍） | 2026-10-06 |
 | 收工门禁（**待改**） | "查完成没完成的那条命令" | `$STEPS` | check.ps1 | `npm run typecheck` | `$STEPS` 从 2 条占位换 4 条：typecheck / test / git status / security；结构断言段不动 | 2026-10-06 |
 
 <!-- 4-1 每批落地后把上表的「待建 / 待改」去掉，并删掉本节与「应用外壳」节里重复的行（D11：被取代的登记行同批删） -->
