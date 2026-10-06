@@ -15,15 +15,21 @@
 | TD-006 | 2026-10-06 | `orphans.ps1` 的文档幽灵判据（TD-005 ③ 修完后的**残余**） | 文档 | **还剩 55 项噪声**（主仓实测），两类为主：① **4-1 计划中尚未创建的文件**——`src/character/geometry.ts`、`HeiCat.tsx`、`heicat.css`、`src/interaction/{gaze,hitTest,useCursorFollow,usePointerPassthrough,useDragExit}.ts` 及其 `*.test.ts`、`src/tauriConfig.test.ts`、`VERIFY.md`、`THREAT.md`、`RCA.md`（都在 `DESIGN.md` §4.2 与卡链里，是**前瞻引用**不是幽灵）② **对母版／外部项目的引用**——`skills/roadbook/SKILL.md`、`rules/rules.json`、`START-HERE.md`、`docs/TOOLING.md`、`design/glossary-en.md`、`menu/menu.js`、`codex-pets.net`、`csc.exe`。后果：`docs/README.md:42` 的"文档幽灵每条必落删除／债／补登记"**仍不可执行**；4-1 每批回执要贴的 orphans 汇总行会长期带这 55 项。清偿方向（择一）：把候选限定为"**首段是本仓库现存顶层项**"的路径；或在 `DOC_MAP.json` 加一节"计划中路径白名单"，由 `DESIGN.md` §4.2 的待建行机器同步 | ① 4-1 批次 4 落地后重跑（前瞻引用应自动清零）② 有人真去逐条处理这 55 项 ③ 7-3 下一次清偿卡 | open |  |
 | TD-007 | 2026-10-06 | `gate.ps1` / `orphans.ps1` ↔ 母版 `D:\Code\roadbook\template\` 同名文件 | 设计 | **守护脚本与母版分叉，且分叉面在扩大**：本次在项目侧给 `gate.ps1` 加了 `-BatchAnchor` / `-DeclaredGenerated`、给 `orphans.ps1` 加了文档幽灵消歧判据，母版 `template/` 未同步。SHA256 前 16 位实测：`gate.ps1` 6FE3082B…（本次前与母版逐字节相同）、`orphans.ps1` 094356B7…（同）→ 本次改动**打破**了这两处的逐字节镜像；而已分叉的还有 `check.ps1`（项目 57E423DF… / 母版 26DAF67E…）与 `security.ps1`（项目 AC5922E9… / 母版 8A94B50D…）。后果：母版升级时无法再用"逐字节相同"判断项目侧是否被本地改过，也无法用 diff 直接取母版新版；反向（把项目侧同推母版）会让母版带上项目专属参数。清偿方向（择一，**属改母版仓库、越本项目范围，须用户立项**）：① 把两处扩展反向提到母版 `template/gate.ps1` 与 `template/orphans.ps1`，走母版自己的 `_qc/check.ps1` + 中英双语卡同批 ② 明确接受分叉，并在母版侧登记一份"项目侧扩展清单" | ① 母版下次升级 ② 7-8 结构重构卡 ③ 有人再改这五个守护脚本之一 | open |  |
 
+| TD-008 | 2026-10-06 | `index.html:5,7` | 文档 | **页面标题与图标仍是脚手架**：`<title>Tauri + React + Typescript</title>` + `<link rel="icon" href="/vite.svg">`。4-1 批次 1 已把 `src/App.tsx` 与 `src/App.css` 整份换成摆件形态，但 `DESIGN.md` §4.1 的改动面（6 个文件）**没有把 index.html 列进去**，故本批不越界改它（D6①）。**影响面很小但不为零**：窗口 `skipTaskbar:true` ⇒ 任务栏看不到标题；透明窗口里 favicon 也不可见；真正会看到它的是 devtools 的标签页与将来任何 `tauri build` 的产物元数据 | ① 5-1 归档前的收尾清扫 ② 有人在做"AI 味扫描"时把它挑出来 ③ 7-1 卡改 UI 时 | open |  |
+| TD-009 | 2026-10-06 | `docs/lessons/`（缺一条） | 文档 | **本会话实测到一条值得进 lessons 的坑，但按文件额度裁决没有立卡**：① 编辑工具会给 `.ps1` 抹掉 BOM（`security.ps1:117` 的机械判据拦得住，见 `STATE.md` 风险摘要 ㉟）② 以"某字符串命中 0"为判据时，**源码注释与文档也是被扫对象**——本批第一版 `src/App.tsx` 的注释里写出了那个禁词，判据自己把自己判红（㊶）。两条都还没进 `docs/lessons/`（4-1 收尾只剩 3 个文件额度，优先留给代码） | 4-1 全部批次收尾、文件额度腾出来之后；或 7-3 下一次清偿卡 | open |  |
+
 <!-- 债务只增不减不是坏，坏的是"closed 却没有证据"。每周归档时滚动一次；腐化类关键词是全表通用筛选口径，不随项目改 -->
 
 ## 7-3 P2 批 · 守护脚本口径（2026-10-06；TD-001 / TD-003 / TD-005 结清，新开 TD-006 / TD-007）
 **四处改动**：`gate.ps1` 加 `-BatchAnchor` 与 `-DeclaredGenerated`（两者默认 `''`/空数组 = **逐字旧行为**）｜`orphans.ps1` 文档幽灵判据补两条消歧｜`scripts/nfr.ps1` 的 `Stop-App` 注释去掉已撤回的归因｜`RESEARCH.md` 五处回到终案。
-**4-1 直接可用的调用形态**（每批复制，把 `$prevBatch` 换成动作 2 记下的上一批末提交）：
+**4-1 直接可用的调用形态**（每批复制；`$scope` = **整任务**的允许清单，不是本批文件清单）：
 ```powershell
 $anchor = (Select-String -Path STATE.md -Pattern '起点锚点\s*[:：]\s*([0-9a-fA-F]{7,40})').Matches[0].Groups[1].Value
-powershell -NoProfile -ExecutionPolicy Bypass -File gate.ps1 -Anchor $anchor -BatchAnchor $prevBatch -ScopeFiles "<本批文件清单>" -DeclaredGenerated "package-lock.json,src-tauri/Cargo.lock" -RepoRoot .
+$prevBatch = (git rev-parse HEAD).Trim()          # 本批开工第一件事记下（4-1 卡动作 2 的 $prevBatch）
+$scope = 'package.json,package-lock.json,src-tauri/,src/,check.ps1,docs/,STATE.md,CHANGELOG.md,public/'
+powershell -NoProfile -ExecutionPolicy Bypass -File gate.ps1 -Anchor $anchor -BatchAnchor $prevBatch -ScopeFiles $scope -DeclaredGenerated "package-lock.json,src-tauri/Cargo.lock" -RepoRoot .
 ```
+- **`-ScopeFiles` 是任务累计口径，不是"本批"**：⑤ 越界判的是 `-Anchor..HEAD` ∪ 未提交的全部改动（4-1 卡原文 = "换成 SCOPE 文件清单"）。**本仓实测的教训**：批次 1a 时把它写成"本批这 4 个文件" → 门禁一次报 **13 条假越界**（全是批次 0 已提交的文件）。要收窄的只有 ⑥⑦，那是 `-BatchAnchor` 的职责。
 - **为什么不是 4-1 卡原文那条命令**：卡原文是「任务起点锚点 + SCOPE 清单」，写到第二批就会把前几批的改动算成"越界"，并把 `Cargo.lock` 一并拖进行数与 lockfile 判据 → 实测多条假红。现在 ⑤ 越界／⑧ 文档义务仍按**任务累计**（正是卡想要的"防范围蔓延"），只把 ⑥ 行数／⑦ lockfile 收到**本批**。
 - **`-DeclaredGenerated` 的两个固定值**：`package-lock.json`（1188 行）与 `src-tauri/Cargo.lock`（4897 行）——两者都必然撞 ⑥ 的 500 行上限。声明 ≠ 免说明：**仍须单独提交 + 提交信息里写明原因**，且**仍必须在 `-ScopeFiles` 里**（豁免绕不过 ⑤）。
 - **假绿口子（唯一）**：`-BatchAnchor` 传错值。传 `HEAD~1` 会把本批的 lockfile 从 ⑥⑦ 放走；必须传 `$prevBatch`（首批 = `$anchor`）。

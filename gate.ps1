@@ -4,12 +4,16 @@
 # 用法（复制即用；缺参数或指错仓库时脚本会把这两行原样打回来）：
 #   powershell -NoProfile -File gate.ps1 -Anchor HEAD~1 -ScopeFiles "src/a.ts,src/b.ts" -RepoRoot .
 #   powershell -NoProfile -File gate.ps1 -Anchor 9f8e7d6 -ScopeFiles "src/" -RepoRoot .   （9f8e7d6 换成你本批的起点提交哈希）
-# 参数：-Anchor 本批起点锚点（git 提交）｜-ScopeFiles 本批允许改动的文件或目录（多个用**逗号**写在同一个引号里；目录项写 "src/" 或写到已存在的目录名）
+# 参数：-Anchor **本任务**起点锚点（git 提交）｜-ScopeFiles **本任务**允许改动的文件或目录（多个用**逗号**写在同一个引号里；目录项写 "src/" 或写到已存在的目录名）
+#   ⚠️ -ScopeFiles 的口径是**任务累计**，不是"本批"：⑤ 越界 判的是 `-Anchor..HEAD` ∪ 未提交的全部改动。
+#   所以这里要给"整个任务可能碰到的路径"（4-1 卡原文 = "换成 SCOPE 文件清单"）。若给成"本批这几个文件"，
+#   从第二批起会把前几批已提交的改动全部判成越界——**本仓实测：批次 1a 一次报 13 条假越界**。
+#   要收窄的只有 ⑥ 行数 与 ⑦ lockfile，那是 -BatchAnchor 的职责，不是 -ScopeFiles 的。
 #   ｜-LineLimit/-TestLineLimit 行数硬阈值（测试文件豁免到后者）｜-RepoRoot git 工作树根，默认当前目录。
 #   ｜-BatchAnchor（**项目侧扩展 · TD-003**）本批口径锚点，默认 '' = 逐字旧行为。传了它：⑥ 行数 与 ⑦ lockfile
 #     只看 `$BatchAnchor..HEAD`（本批）；⑤ 越界 与 ⑧ 文档义务**永远**按 `-Anchor` 的**任务累计**口径判。
-#     为什么：4-1 卡原文是「$anchor 取 STATE 的任务起点锚点 + $scopeFiles 取 SCOPE 清单」，跑到第二批就会把
-#     前几批的改动算成"越界"、把 `Cargo.lock` 一并拖进行数与 lockfile 判据（实测 13 条假红）。
+#     为什么需要它：把 ⑥⑦ 也按任务累计判，会把前几批已提交的 `Cargo.lock` 一直拖进本批的行数与 lockfile 判据
+#     （本仓 3-7 卡实测 13 条假红，其中两条正来自这里）。
 #     ⚠️ 唯一的假绿口子 = 传错值：`-BatchAnchor` 必须取**上一批末提交**（4-1 卡动作 2 记下的 `$prevBatch`），
 #     不是 `HEAD~1`——写成 `HEAD~1` 会把本批的 lockfile 从 ⑥⑦ 放走。
 #   ｜-DeclaredGenerated（**项目侧扩展 · TD-001**）生成物清单（逗号串，默认 '' = 无任何豁免通道）。声明过的
