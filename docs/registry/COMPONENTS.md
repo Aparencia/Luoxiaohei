@@ -27,7 +27,7 @@
 | 界面元素 | 人话标识 | 程序名 | 文件 | 搜索词 | 影响面 | 最近确认 |
 | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
 | 角色根 `<svg>`（**待建**） | "猫" | `HeiCat` | src/character/HeiCat.tsx | `viewBox` | 被 src/App.tsx 引用（1 处）；import `./heicat.css` 与 `./geometry.ts`；N/A（无个人数据）；N/A（无交互控件，仅图形） | 2026-10-06 |
-| 角色几何常量（**待建**） | "猫各部件的位置数字" | `CAT_GEOMETRY` | src/character/geometry.ts | `characterBounds` | 被 HeiCat.tsx 与 src/interaction/hitTest.ts 引用（2 处）；N/A；N/A | 2026-10-06 |
+| 角色几何常量（**待建**） | "猫各部件的位置数字" | `CAT_GEOMETRY` | src/character/geometry.ts | `characterBounds` | 被 HeiCat.tsx 与 src/interaction/hitTest.ts 引用（2 处）；**坐标系 = 320×360**（`VIEW_BOX` 由 3-5 卡勘误为 `'0 0 320 360'`，原写 `'0 0 260 300'` 会裁掉脚）；`characterBounds()` 输出**换算到 CSS px（设计坐标 ×0.8125）**，与 `screenToViewport` 同一坐标系；`tail.pathD` 参与 M3 的弧长断言（口径见 `docs/DESIGN_TOKENS.md` §10）；N/A；N/A | 2026-10-06 |
 | 角色动画表（**待建**） | "呼吸眨眼甩尾的节奏" | — | src/character/heicat.css | `@keyframes breathe` | 被 HeiCat.tsx import（1 处）；被 motion.test.ts 按文本解析（1 处）；**只允许合成层属性**（transform/opacity）；N/A；N/A（装饰性动画，`prefers-reduced-motion` 由 3-6 卡定） | 2026-10-06 |
 | 瞳孔跟随（**待建**） | "眼珠跟着鼠标转" | `useCursorFollow` | src/interaction/useCursorFollow.ts | `SAMPLE_HZ` | 被 src/App.tsx 引用（1 处）；**全项目唯一的 60Hz 定时器持有者**；N/A；N/A | 2026-10-06 |
 | 透明区穿透（**待建**） | "点到透明的地方就是点到桌面" | `usePointerPassthrough` | src/interaction/usePointerPassthrough.ts | `setIgnoreCursorEvents` | 被 src/App.tsx 引用（1 处）；零定时器，消费 useCursorFollow 的同一 tick；N/A；N/A | 2026-10-06 |
