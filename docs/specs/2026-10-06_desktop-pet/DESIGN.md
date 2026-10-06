@@ -132,6 +132,7 @@ I7  req(menu|new) {"kind":"Menu","options":{"items":[…]},"handler":<Channel>} 
 ```
 
 - **不加** `core:window:allow-set-always-on-top` / `allow-set-skip-taskbar`：`alwaysOnTop` 与 `skipTaskbar` 由 `tauri.conf.json` 静态配置满足（M1），运行时不再调它们（NFR S2「不得保留未被调用的授权」）。
+- **`acl OK 4/4` 的口径（防 4-1 各写各的）**：该行断言的是**除 `core:default` 之外的 4 条具名授权**（`allow-close` / `allow-start-dragging` / `allow-set-ignore-cursor-events` / `core:menu:default`）；`permissions` **总数 = 5 条**（NFR S2 的上限）。测试打印 4 是因为 SCOPE §5 M2 的命令原文写的就是 4 条具名项，不是"总共有 4 条"。
 - **删除** `opener:default`：前端零引用（RESEARCH 2-4 卡实测，`git grep -n opener` 5 处全是脚手架注册点）→ 见 §4.3 退役清单。
 
 ### 3.3 错误码（新错误码，同批登记 `docs/registry/APIS.md`）
@@ -154,17 +155,18 @@ I7  req(menu|new) {"kind":"Menu","options":{"items":[…]},"handler":<Channel>} 
 | `alwaysOnTop` | 未写（默认 false） | **true** | 同上 |
 | `skipTaskbar` | 未写（默认 false） | **true** | 同上 |
 | `shadow` | 未写（**默认 true**） | **false** | RESEARCH **F4** 原文：无边框窗口下 `true` 会产生 1px 白边，Win11 还带圆角 |
-| `resizable` / `maximizable`（**3-4 卡追加**） | 未写（默认 `true` / `true`） | **`false` / `false`** | 3-4 卡：无边框窗口仍可被拖边缘或 Win+Up 改尺寸 → 与 `VIEW_BOX = '0 0 260 300'` 失配，直接破 M6 命中判定与 M3 造型比例。`minimizable` **保持默认 `true`**（NFR A3 的验证动作要"最小化→还原"，关掉它该行就无法验证）。理由与断言落点见 `docs/UI.md` §6：第二行 `window-lock OK 2/2`，M1 原有的 `window-config OK 6/6` 不动 |
+| `resizable` / `maximizable`（**3-4 卡追加**） | 未写（默认 `true` / `true`） | **`false` / `false`** | 3-4 卡：无边框窗口仍可被拖边缘或 Win+Up 改尺寸 → 与 `VIEW_BOX`（§3.5，终值 `'0 0 320 360'`）失配，直接破 M6 命中判定与 M3 造型比例。`minimizable` **保持默认 `true`**（NFR A3 的验证动作要"最小化→还原"，关掉它该行就无法验证）。理由与断言落点见 `docs/UI.md` §6：第二行 `window-lock OK 2/2`，M1 原有的 `window-config OK 6/6` 不动 |
 
 ### 3.5 前端模块签名（钉死到函数级，4-1 不再做设计决策）
 
 ```text
 src/character/geometry.ts        （纯数据 + 纯查询，无副作用）
-  export const VIEW_BOX = '0 0 260 300'
+  export const VIEW_BOX = '0 0 320 360'   // 3-5 勘误：原写 '0 0 260 300' 与 DESIGN_TOKENS §10 的 320×360 设计坐标系冲突（身体底沿 y=352 会被裁）；元素仍渲染 260 CSS px 宽 → 高 292.5，正好留出 SCOPE §7 的底部 8px
   export const CAT_GEOMETRY: { head: Ellipse; eyeWhites: [Ellipse, Ellipse]; pupils: [Circle, Circle];
-                               eyelidTravelPx: number; tail: { rootX: number; rootY: number; lengthPx: number };
+                               eyelidTravelPx: number; tail: { rootX: number; rootY: number; lengthPx: number; pathD: string };
+                               // tail.lengthPx = 声明的目标弧长（408，设计坐标）；pathD 是 4-1 画的曲线，采样出的弧长 ≥ 1.20 × 体高才过 M3（见 DESIGN_TOKENS §10）
                                torsoOriginY: number }
-  export function characterBounds(): Bounds[]        // 供 hitTest 粗筛；纯函数
+  export function characterBounds(): Bounds[]        // 输出换算到 CSS px（设计坐标 ×0.8125），与 screenToViewport 同一坐标系；供 hitTest 粗筛；纯函数
 
 src/interaction/gaze.ts          （纯函数）
   export const SAMPLE_HZ = 60                        // M5 验收命令断言这个常量
@@ -292,11 +294,11 @@ $STEPS = @('npm run typecheck','npm run test','git status --porcelain','powershe
 | 文件 | 现有行数（实测） | 增 | 删 | 改动行数 | 改动面 |
 | :-- | --: | --: | --: | --: | --: |
 | `src/App.tsx` | 51 | 60 | 33 | 93 | **182 %** |
-| `src/App.css` | 116 | 40 | 106 | 146 | **126 %** |
+| `src/App.css` | 111 | 40 | 101 | 141 | **127 %** |
 | `src-tauri/src/lib.rs` | 14 | 3 | 12 | 15 | **107 %** |
-| **合计** | **181** | **103** | **151** | **254** | **140 %** |
+| **合计** | **176** | **103** | **146** | **249** | **141 %** |
 
-（增删数取自 SCOPE §0 行数账，逐文件核对过；`src/App.tsx`/`App.css`/`lib.rs` 的现有行数为本卡实测。）
+（增删数取自 SCOPE §0 行数账，逐文件核对过；`src/App.tsx`/`App.css`/`lib.rs` 的现有行数为本卡实测。**`App.css` 一行的现有行数由 116 重算为 111**——3-4 卡为过动作 12 的「命中 0」判据删掉了模板自带的 `input,button{outline:none}` 4 行 + 1 空行；`112−10` 的算法不变：整份替换后保留约 10 行 `html/body` 规则。）
 
 **结论：重写**（三票全 ≥40%，且各自 >60%）。两条前置条件**同时成立**（卡内判据要求）：
 

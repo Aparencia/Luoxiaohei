@@ -47,8 +47,8 @@
 | :-- | :-- | :-- | :-- | :-- |
 | KP-01 | `node --test src/tauriConfig.test.ts` | 读 `src-tauri/tauri.conf.json` 的 `app.windows[0]` | 六个键逐一成立：`width=260`/`height=300`/`transparent=true`/`decorations=false`/`alwaysOnTop=true`/`skipTaskbar=true`，**且 `shadow=false`**；打印 `window-config OK 6/6` | 该文件 |
 | KP-02 | 同上 | 读 `src-tauri/capabilities/default.json` 的 `permissions` | 含 `core:window:allow-close`、`core:window:allow-start-dragging`、`core:window:allow-set-ignore-cursor-events`、`core:menu:default`；打印 `acl OK 4/4`；**且不含 `opener:default`** | 该文件 |
-| KP-03 | 同上 | 数授权条目总数 | ≤ 5（NFR `security` S2），且**每条授权都能在 `src/interaction/` 里找到调用方**（不留未被调用的授权） | 该文件 |
-| KP-04 | `node --test src/character/geometry.test.ts` | 读 `src/character/geometry.ts` 的 `CAT_GEOMETRY` | 两眼外接矩形合并宽 / 头宽 ≥ 0.60；耳距 / 头宽 ≥ 0.55；尾长 / 体高 ≥ 1.20；造型色板里 `#FFFFFF` 只出现 2 个区域（两只眼白）；**通体主色为黑** | 该文件 |
+| KP-03 | 同上 | 数授权条目总数 | ≤ 5（NFR `security` S2）；**口径**：`acl OK 4/4` 断言的是**除 `core:default` 外的 4 条具名授权**，`permissions` 总数 = 5 条（DESIGN §3.2）；"每条授权都能找到调用方"的完整核对**自批次 4 起**（`src/interaction/` 那时才存在；批次 1 只判 5 条齐全，不留未调用授权由 4-2 静态复核） | 该文件 |
+| KP-04 | `node --test src/character/geometry.test.ts` | 读 `src/character/geometry.ts` 的 `CAT_GEOMETRY` | 两眼外接矩形合并宽 / 头宽 = 184/200 ≥ 0.60；**耳距（两耳根中心距）/ 头宽** = 120/200 ≥ 0.55；**尾长（`tail.pathD` 采样出的弧长）/ 体高（耳尖 y 24 → 身体底沿 y 352 = 328）** ≥ 1.20；`fill="#FFFFFF"` 的元素恰好 2 个（**按元素计数，不按像素区域计数**）；**通体主色为黑**。三个比值的语义与取值见 DESIGN_TOKENS §10 | 该文件 |
 | KP-05 | `node --test src/character/motion.test.ts` | 读 `src/character/heicat.css` 文本 | 呼吸周期 3.2s±0.2；眨眼单次 ≤ 100ms；甩尾周期 2.4s±0.2；尾摆幅度 ±8°±1°；**三组周期两两不相等** | 该文件 |
 | KP-06 | 同上 | 扫 `heicat.css` 的动画属性 | 三组 `@keyframes` 只动 `transform`/`opacity`（**合成层**，NFR `perf` P1 的模块约束），出现 `width`/`top`/`left` 之类即红 | 该文件 |
 | KP-07 | `node --test src/interaction/gaze.test.ts` | 调纯函数 `gazeAngle(dx, dy)` | `(1,0)→0°`、`(0,1)→90°`、`(-1,0)→180°`、`(0,-1)→-90°`、`(0,0)→0°`、距窗口中心 >1500px 时归 0 | 该文件 |
@@ -65,7 +65,7 @@
 > **阈值用例（卡要求"至少 1 条"）**：**KP-12** 就是——它是 NFR `perf` **P3「瞳孔跟随采样率 60 Hz ±5%」**唯一能在 `node --test` 里断言的形态（断言常量 + 断言"单 tick 单次采样"的行为，而不是只断言 `SAMPLE_HZ === 60` 这个数字）。
 > **越权拒绝用例**：**无**——本项目零认证面（3-2 威胁建模永久跳过，五类红线域未触碰，裁剪依据见 `STATE.md`）。显式接受，替代手段见 §5 第 7 行。
 
-### 2.2 阈值类（26 条实阈值，25 条**跑不出 `node --test`**，必须真机跑 → 归 4-3）
+### 2.2 阈值类（26 条实阈值，其中**只有 P3 能跑 `node --test`**，其余 25 条必须真机跑 → 归 4-3）
 
 NFR 的 26 条实阈值逐条不漏地在这三处落定，本卡不重复它们的正文（信息阶梯：同一事实只写一处）：
 
