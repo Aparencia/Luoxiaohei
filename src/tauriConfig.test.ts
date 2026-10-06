@@ -120,19 +120,24 @@ test("M8 · 门禁命令形态（check.ps1 的 $STEPS 依赖这两条 script）"
 
 // ── 反同义反复的行为断言：每条授权都能找到调用方（TESTPLAN KP-03 的另一半）──────────────
 // 判据一句话：改哪一行**生产代码**会让它变红？——删掉某个 hook 里那一次 invoke → 本用例红。
-const CALLERS: Array<{ perm: string; file: string; token: string }> = [
-  { perm: "core:window:allow-close", file: "src/interaction/useDragExit.ts", token: "close" },
+// 字段名刻意叫 `symbol` 而不是 `token`：`security.ps1` 有一条正当的判据
+// `(?:password|passwd|secret|token)\s*[:=]\s*['"]([^'"]{6,})['"]`（明文口令赋值），
+// 而本数组里写的恰好是 `标识符: "长字符串"` 的形状 → 用 `token` 当键名会被判成"泄露密钥"
+// （实测 check.ps1 退出码 1、红 2 条，指到 "startDragging" 与 "setIgnoreCursorEvents"）。
+// 正确的反应是改命名，不是放宽那条判据——放宽等于把真正的口令赋值也一起放走。
+const CALLERS: Array<{ perm: string; file: string; symbol: string }> = [
+  { perm: "core:window:allow-close", file: "src/interaction/useDragExit.ts", symbol: "close" },
   {
     perm: "core:window:allow-start-dragging",
     file: "src/interaction/useDragExit.ts",
-    token: "startDragging",
+    symbol: "startDragging",
   },
   {
     perm: "core:window:allow-set-ignore-cursor-events",
     file: "src/interaction/usePointerPassthrough.ts",
-    token: "setIgnoreCursorEvents",
+    symbol: "setIgnoreCursorEvents",
   },
-  { perm: "core:menu:default", file: "src/interaction/useDragExit.ts", token: "Menu" },
+  { perm: "core:menu:default", file: "src/interaction/useDragExit.ts", symbol: "Menu" },
 ];
 
 // ceiling: 批次 1 时 src/interaction/ 还不存在，"授权 ↔ 调用方"只能对已落盘的模块生效（现在 0/4 条被真正核对，本用例只打印进度不判红）
@@ -146,8 +151,8 @@ test("KP-03 · 每条授权都能找到调用方（未落盘的模块跳过并�
       continue;
     }
     assert.ok(
-      readText(c.file).includes(c.token),
-      `${c.file} 里找不到 ${c.token} —— ${c.perm} 成了"未被调用的授权"（NFR S2）`,
+      readText(c.file).includes(c.symbol),
+      `${c.file} 里找不到 ${c.symbol} —— ${c.perm} 成了"未被调用的授权"（NFR S2）`,
     );
     checked.push(c.perm);
   }
