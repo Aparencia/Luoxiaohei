@@ -1,0 +1,95 @@
+/* 产物寿命：持久（进仓库）｜ 卡：4-1 批次 2 ｜ M3 造型的静态样式
+ *
+ * 色值只允许出现在本文件的 `:root`（DESIGN_TOKENS §6）——唯一的例外是眼白的那个白色字面量：
+ * M3 的冻结断言按白色 fill 数元素（TESTPLAN KP-04），改成 `var()` 判据就变空，
+ * 所以它写在 `HeiCat.tsx` 的 fill 上、本文件**不定义**同名变量（同一事实只写一处）。
+ * ⚠️ 本文件（含注释）也不许出现那个白色字面量：`geometry.test.ts` 的 M3·⑤ 会扫本文件的色板，
+ * 注释里写一遍就等于往色板里加了一个亮色（4-1 批次 2 实测，同一类坑见风险摘要 ㊶）。
+ *
+ * 本批只落静态姿态；M4 的三组 @keyframes（呼吸 / 眨眼 / 甩尾）在 4-1 批次 3 追加到本文件末尾。
+ */
+:root {
+  --hei-ink-900: #08080D; /* 瞳孔 ×2：占眼白大部分面积 */
+  --hei-ink-800: #0A0A0F; /* 身体与尾巴渐变下端 */
+  --hei-ink-700: #0D0D13; /* 头部渐变下端 */
+  --hei-ink-600: #1C1C27; /* 身体与尾巴渐变上端 */
+  --hei-ink-500: #272735; /* 头部渐变上端；眼睑复用此阶 */
+  --hei-ink-400: #66667F; /* 前后腿分缝线（图形边界，对 600 档 3.03:1） */
+  --hei-ink-300: #75758F; /* 轮廓冷光边：纯黑角色在深色桌面上"不糊掉"的唯一手段 */
+}
+
+.hei-cat {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* SCOPE §7：pointer-events 仅绘制形状可命中 —— 先在根上关掉，再由下面的形状逐个打开 */
+  pointer-events: none;
+}
+
+/* 渐变停点：`stop-color` 是 CSS 属性，所以色值仍然只住在 :root */
+.hei-stop-500 {
+  stop-color: var(--hei-ink-500);
+}
+.hei-stop-700 {
+  stop-color: var(--hei-ink-700);
+}
+.hei-stop-600 {
+  stop-color: var(--hei-ink-600);
+}
+.hei-stop-800 {
+  stop-color: var(--hei-ink-800);
+}
+
+/* 画出来的形状都要能命中（透明区不能 —— 那正是 M6 穿透要判的东西） */
+.hei-tail,
+.hei-ear,
+.hei-torso,
+.hei-leg,
+.hei-head,
+.hei-eye-white,
+.hei-pupil,
+.hei-eyelid {
+  pointer-events: visiblePainted;
+}
+
+/* 冷光轮廓边：`paint-order: stroke fill` 让描边压在自己的填充之下 → 只留最外一圈，
+   于是不需要 DESIGN_TOKENS §10 的两遍绘制（那要求把每条 d 抄两份）。 */
+.hei-tail,
+.hei-ear,
+.hei-torso,
+.hei-head {
+  stroke: var(--hei-ink-300);
+  stroke-width: 4;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+}
+
+.hei-tail,
+.hei-torso {
+  fill: url(#hei-body-grad);
+}
+
+.hei-ear,
+.hei-head {
+  fill: url(#hei-head-grad);
+}
+
+/* 前腿：填充与身体同源，靠 400 档描边分出前后腿（DESIGN_TOKENS §1 的 400 档唯一消费者） */
+.hei-leg {
+  fill: url(#hei-body-grad);
+  stroke: var(--hei-ink-400);
+  stroke-width: 3;
+  paint-order: stroke fill;
+}
+
+.hei-pupil {
+  fill: var(--hei-ink-900);
+}
+
+/* 眼睑：静态 scaleY(0) 收成一条线 —— 形状本身与眼白等高，所以盖满时整只眼变成头部底色 */
+.hei-eyelid {
+  fill: var(--hei-ink-500);
+  transform-box: fill-box;
+  transform-origin: 50% 0%;
+  transform: scaleY(0);
+}
