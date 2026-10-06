@@ -10,6 +10,8 @@
 
 - **窗口成为真正的桌面摆件**：窗口配置从脚手架的 800×600 有边框不透明，改为 **260×300 / 背景透明 / 无边框 / 永远置顶 / 不进任务栏 / 无阴影 / 不可缩放不可最大化**（8 个键）。前六项是"活摆件"这个概念本身的前提（不透明就挡住桌面、有边框就不像摆件、不置顶就会被别的窗口盖住、有阴影会在无边框窗口上留一条 1px 白边）；后两项锁死尺寸，否则窗口能被拖边缘或 Win+Up 改尺寸，与角色坐标系失配会同时破"点哪儿算点到猫"与造型比例
 - 权限清单新增 `core:window:allow-set-ignore-cursor-events`（透明区穿透开关所需的授权；`core:window:default` 不含它）
+- **门禁第一次开始检查代码**：`check.ps1` 的 `$STEPS` 从 1-2 卡的零依赖占位（只看工作树干不干净 + 密钥扫描）换成 4 条真实命令——`npm run typecheck`（`tsc --noEmit`）→ `npm run test`（`node --test` 跑 `src/**/*.test.ts`）→ 工作树干净 → 密钥扫描。此前它对代码零断言，4-1 之后每一批都会是假绿
+- 新增 `src/tauriConfig.test.ts`（6 个用例）：窗口六键、尺寸锁两键、ACL 四条具名授权、授权总数上限、门禁命令形态，以及一条**行为断言**「每条授权都能找到调用方」——它问的是"改哪一行生产代码会让它变红"（删掉某个 hook 里的一次调用 → 红），用来抵消"只断言常量"的同义反复风险；批次 4 的四个交互模块落地后，它会自动从"跳过 4 条"升为"全量核对 4 条"
 
 - 项目初始化：Tauri 2 + React 19 + TypeScript 桌面应用骨架（选型见 `docs/decisions/STACK_2026-10-06_桌面摆件技术栈.md`）
 - Roadbook V6 流程骨架：`AGENTS.md` 宪法、`STATE.md` 状态源、`docs/` 文档地图、五个守护脚本
@@ -48,7 +50,8 @@
 
 ### 废弃
 
-- 无
+- 脚手架演示页与它的依赖链整体退役（SCOPE §1 的任务复述明确"不含"这些行为）：`src/App.tsx` 与 `src/App.css` 整份换成摆件形态（App 变成空装配点、CSS 111 → 22 行只留透明与尺寸约束）；Rust 侧的演示命令与 `tauri-plugin-opener` 注册删除；npm 侧的 `@tauri-apps/plugin-opener` 卸载；`public/tauri.svg` 与 `src/assets/react.svg` 两个失去引用者的素材删除。**退役判据是可判定的**：`git grep -n` 两个词在 `src/` + `src-tauri/` + `package.json` 命中均为 **0**。两个 lockfile 随批重算（`Cargo.lock` 4897 → 4382 行）
+- `src-tauri/capabilities/default.json` 删除 `opener:default`：前端零引用，留着它最小权限就无从成立（NFR security S2 禁保留未被调用的授权）
 
 ### 修复
 

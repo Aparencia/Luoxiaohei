@@ -8,12 +8,12 @@
 
 | 界面元素 | 人话标识 | 程序名 | 文件 | 搜索词 | 影响面 | 最近确认 |
 | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
-| 应用根组件 | "整个界面" | App | src/App.tsx | `App` | 被 src/main.tsx 引用（1 处）；**当前是脚手架演示页，首个功能会整份替换**（3-1 卡已把它列进下方「待改」表）；N/A（无个人数据）；N/A（暂无交互控件） | 2026-10-06 |
+| 应用根组件 | "整个界面" | App | src/App.tsx | `App` | 被 src/main.tsx 引用（1 处）；**4-1 批次 1 已整份替换脚手架演示页**，现为"装配点空着"形态（渲染 `null`），后续批次只做加法：批次 2 接 `<HeiCat/>`、批次 3 接 `useCursorFollow`、批次 4 接 `usePointerPassthrough` / `useDragExit`；N/A（无个人数据）；N/A（暂无交互控件） | 2026-10-06 |
 | 前端挂载点 | "把 React 挂上去的那段" | — | src/main.tsx | `createRoot` | 被 index.html 引用（1 处）；无 | 2026-10-06 |
 | 构建配置 | "打包怎么配的" | — | vite.config.ts | `defineConfig` | 开发与打包共用；dev 端口 1420，**必须与 src-tauri/tauri.conf.json 的 devUrl 一致** | 2026-10-06 |
 | Vite 类型声明 | "Vite 的类型补丁" | — | src/vite-env.d.ts | `vite/client` | 全局生效、无显式引用（`orphans.ps1` 报其为孤儿，**属预期**：这是 Vite 的 ambient 声明） | 2026-10-06 |
 | Rust 入口 | "程序真正启动的地方" | main | src-tauri/src/main.rs | `luoxiaohei_lib::run` | 调 src-tauri/src/lib.rs 的 `run()`（1 处） | 2026-10-06 |
-| Rust 逻辑入口 | "窗口与命令都在这" | run | src-tauri/src/lib.rs | `tauri::Builder` | 被 src-tauri/src/main.rs 引用（1 处）；**窗口控制命令加在这里**；当前含脚手架自带的 `greet` 演示命令（3-1 卡已把它列进下方「待改」表，删除条件 = `git grep -n greet` 命中 0） | 2026-10-06 |
+| Rust 逻辑入口 | "窗口与命令都在这" | run | src-tauri/src/lib.rs | `tauri::Builder` | 被 src-tauri/src/main.rs 引用（1 处）；**窗口控制命令加在这里**；**4-1 批次 1 已删掉脚手架的演示命令与 `tauri-plugin-opener` 注册**（`git grep -n` 两词在 `src/`+`src-tauri/` 命中均为 0）；当前 `run()` 只做 `tauri::Builder::default().run(generate_context!())` | 2026-10-06 |
 | 编译期构建脚本 | "Tauri 的编译钩子" | main | src-tauri/build.rs | `tauri_build` | 编译期自动执行，无运行时引用 | 2026-10-06 |
 
 <!-- 搜索词 = 下次 3 秒找到你的关键词组合：组件名/文案/路由。改完行不回写 = 卡片过期比没有更毒 -->
@@ -34,18 +34,18 @@
 | 拖拽与退出（**待建**） | "拖着走 + 右键退出" | `useDragExit` | src/interaction/useDragExit.ts | `startDragging` | 被 src/App.tsx 引用（1 处）；SCOPE S1 位置记忆的唯一改动点；N/A；右键菜单仅一项「退出」；键盘路径 = **Alt+F4**（Windows `WM_CLOSE`，3-4 卡登记，4-3 核） | 2026-10-06 |
 | 瞳孔角度纯函数（**待建**） | "算眼珠该转多少度" | `gazeAngle` | src/interaction/gaze.ts | `SAMPLE_HZ` | 被 useCursorFollow.ts 引用（1 处）；N/A；N/A | 2026-10-06 |
 | 命中判定纯函数（**待建**） | "算鼠标是不是在猫身上" | `screenToViewport` | src/interaction/hitTest.ts | `isOverCharacter` | 被 usePointerPassthrough.ts 引用（1 处）；N/A；N/A | 2026-10-06 |
-| 窗口配置断言（**待建**） | "查窗口配对了没" | — | src/tauriConfig.test.ts | `window-config OK` | SCOPE M1/M2 的验收命令载体；读 tauri.conf.json 与 capabilities/default.json（2 处）；N/A；N/A（测试文件） | 2026-10-06 |
+| 窗口配置断言（**批次 1 已建**） | "查窗口配对了没" | — | src/tauriConfig.test.ts | `window-config OK` | SCOPE M1/M2/M8 的验收命令载体；读 tauri.conf.json 与 capabilities/default.json（2 处）；**6 个用例**（M1 六键 / 尺寸锁两键 / acl 4 条具名 / 授权总数 ≤5 / 门禁命令形态 / 授权↔调用方）；末条是 `window-config OK 6/6` 的反同义反复行为断言（TESTPLAN KP-03），批次 4 起自动升为 4/4 全量；文件顶部有 `/// <reference types="node" />`——**TS 6.0 不再自动纳入 `node_modules/@types/*`**，且 SCOPE §5 禁止改 tsconfig 的 types 白名单；N/A；N/A（测试文件） | 2026-10-06 |
 | 几何断言（**待建**） | "查造型比例对不对" | — | src/character/geometry.test.ts | `眼白` | SCOPE M3 的验收命令载体；N/A；N/A | 2026-10-06 |
 | 动画断言（**待建**） | "查动画节奏对不对" | — | src/character/motion.test.ts | `3.2s` | SCOPE M4 的验收命令载体；N/A；N/A | 2026-10-06 |
 | 跟随断言（**待建**） | "查眼珠转得对不对" | — | src/interaction/gaze.test.ts | `SAMPLE_HZ === 60` | SCOPE M5 的验收命令载体；N/A；N/A | 2026-10-06 |
 | 穿透断言（**待建**） | "查命中判定对不对" | — | src/interaction/hitTest.test.ts | `scaleFactor` | SCOPE M6 的验收命令载体；N/A；N/A | 2026-10-06 |
 | 拖拽退出断言（**待建**） | "查拖拽和右键发出的是哪条命令" | — | src/interaction/dragExit.test.ts | `mockIPC` | SCOPE M7 的验收命令载体；N/A；N/A | 2026-10-06 |
 | 窗口本体（**批次 0 已落**） | "那只猫所在的框" | — | src-tauri/tauri.conf.json | `alwaysOnTop` | **8 键已落**（260×300 / `transparent:true` / `decorations:false` / `alwaysOnTop:true` / `skipTaskbar:true` / `shadow:false` / `resizable:false` / `maximizable:false`；`minimizable` 保持默认 `true`）；被 src/tauriConfig.test.ts 读（1 处，批次 1 建） | 2026-10-06 |
-| 权限清单（**批次 0 部分落**） | "它被允许干什么" | — | src-tauri/capabilities/default.json | `allow-set-ignore-cursor-events` | 现 **3** 条（`core:default` / `opener:default` / `core:window:allow-set-ignore-cursor-events`——第 3 条是批次 0 为 A3 实验加的）；**批次 1 落终值 5 条并删 `opener:default`**；APIS.md 的 I1~I3、I7 全依赖它 | 2026-10-06 |
-| Rust 逻辑入口（**待改**） | "窗口与命令都在这" | `run` | src-tauri/src/lib.rs | `tauri::Builder` | 删 `greet` 命令与注册（3 处）；删 `tauri_plugin_opener` 注册（1 处）；窗口构建不动 | 2026-10-06 |
-| 应用根组件（**待改**） | "整个界面" | `App` | src/App.tsx | `HeiCat` | 整份替换（脚手架演示页 → 摆件装配）；引用 HeiCat + 三个 hook（4 处） | 2026-10-06 |
-| 全局样式（**批次 0 部分改 / 批次 1 整份替换**） | "窗口的底色与定位" | — | src/App.css | `background` | 批次 0 把两处 `:root` 背景改成 `transparent`（A3 实验需要可见的透明像素，否则整页 `#f6f6f6` 填满客户区、根本无从取样；该文件本就是批次 1 的整份替换对象）；批次 1 定为：删脚手架样式、只留 `html/body` 全透明 + 100% 尺寸 + 禁滚动；**3-4 卡已就地删掉模板自带的 `input,button{outline:none}` 4 行** | 2026-10-06 |
-| 收工门禁（**待改**） | "查完成没完成的那条命令" | `$STEPS` | check.ps1 | `npm run typecheck` | `$STEPS` 从 2 条占位换 4 条：typecheck / test / git status / security；结构断言段不动 | 2026-10-06 |
+| 权限清单（**批次 1 已落终值**） | "它被允许干什么" | — | src-tauri/capabilities/default.json | `allow-set-ignore-cursor-events` | **5 条终值**（`core:default` + `core:window:allow-close` + `core:window:allow-start-dragging` + `core:window:allow-set-ignore-cursor-events` + `core:menu:default`），`opener:default` 已删；NFR S2 上限 ≤5 正好用满；断言落在 `src/tauriConfig.test.ts` 的 `acl OK 4/4`（4 = 除 `core:default` 外的**具名**授权数）；APIS.md 的 I1~I3、I7 全依赖它 | 2026-10-06 |
+| Rust 逻辑入口（**批次 1 已退**） | "窗口与命令都在这" | `run` | src-tauri/src/lib.rs | `tauri::Builder` | 已删演示命令与其注册（3 处）与 `tauri_plugin_opener` 注册（1 处）；`git grep -n` 两词在 `src/`+`src-tauri/` 命中 **0 / 0**；窗口构建不动 | 2026-10-06 |
+| 应用根组件（**批次 1 已换**） | "整个界面" | `App` | src/App.tsx | `HeiCat` | 已整份替换（脚手架演示页 → 空装配点，渲染 `null`）；批次 2~4 逐个接上 `HeiCat` + 三个 hook（4 处）；带 `ceiling:` / `upgrade:` 标记各 1 行 | 2026-10-06 |
+| 全局样式（**批次 1 已换**） | "窗口的底色与定位" | — | src/App.css | `background` | 已整份替换：111 行 → 22 行，只留 `html/body` 透明 + 100% + `overflow:hidden` + 零边距，加 `#root` 撑满；脚手架样式（含 `#greet-input`）全删；**不写任何角色色值**（取值归 `docs/DESIGN_TOKENS.md`） | 2026-10-06 |
+| 收工门禁（**批次 1 已接**） | "查完成没完成的那条命令" | `$STEPS` | check.ps1 | `npm run typecheck` | `$STEPS` 已从 2 条占位换 4 条真实命令（typecheck / test / git status / security，顺序即 SCOPE §5 M8 的验收输出顺序）；结构断言段不动；`test` 用 **glob** 形态（给目录会假红，见 `docs/lessons/2026-10-06_node-test传目录假红.md`） | 2026-10-06 |
 
 <!-- 4-1 每批落地后把上表的「待建 / 待改」去掉，并删掉本节与「应用外壳」节里重复的行（D11：被取代的登记行同批删） -->
 
