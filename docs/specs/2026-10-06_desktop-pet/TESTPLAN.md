@@ -3,7 +3,7 @@
 > 产物寿命：**持久（进仓库）** ｜ 卡：**3-3 测试策略**（M/L 档必走）｜ 母版：roadbook v0.9.0 / 规则版本 2026-10-05.2
 > 时间戳：开始 2026-10-06 20:07 ｜ 状态：**策略已就绪，4-3 的判据已定**（用例由 4-1 每批同写）
 > 上游：`SCOPE.md` §5 验收标准 / §6 未覆盖输入五类 ｜ `NFR.md` §1 六维阈值 28 行 ｜ `docs/ARCHITECTURE.md` §1~§8 ｜ `DESIGN.md` §3.6（命令原文）
-> 一句话：**35 条单元 + 6 条集成（自动化 <5 s）+ 3 条端到端手测 + 8 次变异体证伪 + 25 条必须在真机上跑出来的阈值命令**。
+> 一句话：**35 条单元 + 8 条集成（自动化 <5 s）+ 3 条端到端手测 + 8 次变异体证伪 + 25 条必须在真机上跑出来的阈值命令**（条数为**实测**：`npm run test` 打印 `tests 46 ｜ pass 46 ｜ fail 0`，其中单元 38 / 集成 8；回填与口径见 §1 的表与 4-2 第 2 轮的 B5-04）。
 
 ## 0. 口径（先说死，免得后面各说各话）
 
@@ -20,8 +20,8 @@
 
 | 层 | 覆盖什么 | 比例 | 预计条数 | 跑一次多久 | 谁写 |
 | :-- | :-- | :-: | --: | :-- | :-- |
-| **单元** | 纯函数 + **仓库内真实文本**的解析断言：`gazeAngle` / `screenToViewport` / `isOverCharacter` / `CAT_GEOMETRY` 的比例 / `heicat.css` 的 keyframes / `tauri.conf.json` 六键 / `capabilities/default.json` 四条 | ~80% | **35** | < 4 s | 4-1 每批同写 |
-| **集成** | 跨进程边界：`@tauri-apps/api/mocks` 的 `mockIPC` 断言真实发出的 IPC 命令、**调用次数**与失败分支（`start_dragging` / `close` / `set_ignore_cursor_events` 的翻转语义） | ~14% | **8** | < 1 s | 4-1 批次 4 / 批次 5 |
+| **单元** | 纯函数 + **仓库内真实文本**的解析断言：`gazeAngle` / `screenToViewport` / `isOverCharacter` / `CAT_GEOMETRY` 的比例 / `heicat.css` 的 keyframes / `tauri.conf.json` 六键 / `capabilities/default.json` 四条 | ~80% | **37** | < 4 s | 4-1 每批同写 |
+| **集成** | 跨进程边界：`@tauri-apps/api/mocks` 的 `mockIPC` 断言真实发出的 IPC 命令、**调用次数**与失败分支（`start_dragging` / `close` / `set_ignore_cursor_events` 的翻转语义） | ~20% | **9** | < 1 s | 4-1 批次 4 / 批次 5 / 批次 6 |
 | **端到端** | 跑 `npm run tauri dev` 后真走一遍的 **3 条**：① 出现猫且背景透明 / 无边框 / 置顶 ② 瞳孔跟随鼠标 + 点透明区选中桌面图标 ③ 拖拽 + 右键「退出」后进程消失 | ~6% | **3**（人工） | 分钟级 | 4-3（人眼看） |
 
 按文件分解（**4-1 批次 5 回填实测值**；此前写的是"预计"，4-2 的 S-11 指出它一直没回填）：
@@ -32,8 +32,8 @@
 | `src/character/geometry.test.ts` | 单元 | 7 | M3 六条比例/白色/头身比 + **M5·⑩ 瞳孔满偏 = 短半径 × 45%（R-02）** |
 | `src/character/motion.test.ts` | 单元 | 6 | M4 呼吸周期 / 眨眼时长 / 甩尾周期 / 摆幅 / 三组周期互不相同 / 只出现合成层属性 |
 | `src/interaction/gaze.test.ts` | 单元 | 9 | M5 六个角度 + 远距归零（**含 `FAR_RESET_PX === 1500` 的常量 pin，R-03**）+ 夹取与无 NaN + `SAMPLE_HZ === 60` |
-| `src/interaction/hitTest.test.ts` | 单元 | 7 | M6 四组 `scaleFactor` + 猫身内外各 1 + **M6·⑦ 形状覆盖与死区（R-01）** |
-| `src/interaction/dragExit.test.ts` | 集成 | 8 | M7 两条命令 + **M7·③ 同一次 `menu\|new` 往返内的两次右键（S-02）** + 同一 tick 只读一次坐标 + 未翻转不 invoke + `E-IPC-02` / `E-IPC-01` 两条失败分支 + **KP-15 失败痕迹去重（S-06）** |
+| `src/interaction/hitTest.test.ts` | 单元 | 9 | M6 四组 `scaleFactor` + 猫身内外各 1 + **M6·⑦ 全窗口双向判据（R-01/R-12/R-14）** + **M6·⑧ 甩尾相位（R-13）** + **M6·⑨ 相位取值绑 CSS（R-13）** |
+| `src/interaction/dragExit.test.ts` | 集成 | 9 | M7 两条命令 + **M7·③ 同一次 `menu\|new` 往返内的两次右键（S-02）** + 同一 tick 只读一次坐标 + 未翻转不 invoke + `E-IPC-02` / `E-IPC-01` 两条失败分支 + **KP-15 失败痕迹去重（S-06）** + **KP-16 成功路径解除静音（R-16）** |
 
 - 三层各自"比例"= **用例条数占比**，不是覆盖率（本项目无覆盖率工具，见 §3）。
 - 端到端为什么只有 3 条且不能自动化：见 §5「哪些不测」第 2 行。

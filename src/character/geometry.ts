@@ -17,14 +17,20 @@
 export type Point = { x: number; y: number };
 export type Ellipse = { cx: number; cy: number; rx: number; ry: number };
 /**
- * 命中形状（单位 CSS px）——**不是一个矩形**。4-2 的 R-01 实测「头含耳一个大矩形」的死区达
- * 窗口面积的 9.9%，所以头用椭圆、耳用三角形（两者本来就是精确几何体），只有形状方正的
- * 躯干与尾段仍用矩形。判定住在 `src/interaction/hitTest.ts` 的 `isOverCharacter()`。
+ * 命中形状（单位 CSS px）——**既不是一个矩形，也不只是填充**。
+ *
+ * 两类：头是椭圆（半径各加描边半宽）；其余部件是**渲染用的那条真实轮廓**（`polygon.points`）
+ * 加上描边带（`polygon.rim` = 描边半宽）。为什么"填充内部 ∪ 描边带"就是画出来的那些像素：
+ * `heicat.css` 给尾巴 / 耳 / 躯干 / 头统一 `stroke-width: 4` + `stroke-linejoin: round`，
+ * 圆角连接下描边区域恰好 = 到轮廓边界距离 ≤ 2 设计 px 的那一圈。
+ *
+ * 两轮教训都是实测：4-2 的 R-01 —— 「头含耳一个大矩形」死区 7740 CSS px² = 窗口 9.9%；
+ * 4-2 第 2 轮的 R-12 —— 只换头耳、躯干与尾段仍是外接矩形，死区只降到 7.12%（真渲染口径）。
+ * 矩形是外接框，框里没画到的像素会被吃住，所以这一版**不留任何矩形**。判定住在 `hitTest.ts`。
  */
 export type Bounds =
-  | { shape: "rect"; x: number; y: number; width: number; height: number }
   | { shape: "ellipse"; cx: number; cy: number; rx: number; ry: number }
-  | { shape: "triangle"; a: Point; b: Point; c: Point };
+  | { shape: "polygon"; points: Point[]; rim: number };
 /**
  * 一只耳 = 一个三角形（耳尖 / 外底角 / 内底角），设计坐标。
  * `pathD` 与命中盒都由这三个点**现算**——手抄第二份坐标迟早漂移（4-2 的 R-01 就是靠这几个点
@@ -69,6 +75,59 @@ export const VIEW_BOX = "0 0 320 360";
 const at = (x: number, y: number): Point => ({ x, y });
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 const fmt = (n: number): string => String(round1(n));
+
+// ── 轮廓小工具（设计坐标系；§4 的"单一事实源"靠它们落地）──────────────────────────────────
+type Cubic = readonly [Point, Point, Point, Point];
+/** 轮廓的一段（绝对坐标）：直线 / 二次贝塞尔 / 三次贝塞尔。 */
+type Seg =
+  | { kind: "L"; to: Point }
+  | { kind: "Q"; c: Point; to: Point }
+  | { kind: "C"; c1: Point; c2: Point; to: Point };
+
+const pointAt = ([p0, p1, p2, p3]: Cubic, t: number): Point => {
+  const u = 1 - t;
+  return {
+    x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
+    y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
+  };
+};
+
+const pointOnQuad = (p0: Point, c: Point, p1: Point, t: number): Point => {
+  const u = 1 - t;
+  return at(u * u * p0.x + 2 * u * t * c.x + t * t * p1.x, u * u * p0.y + 2 * u * t * c.y + t * t * p1.y);
+};
+
+/** 段序列 → 环（不含闭合点，`Z` 由使用方补）；每条曲线采 `per` 个点，段间接点只留一份。 */
+const sampleSegs = (start: Point, segs: readonly Seg[], per: number): Point[] => {
+  const pts: Point[] = [start];
+  let cur = start;
+  for (const seg of segs) {
+    if (seg.kind === "L") {
+      pts.push(seg.to);
+      cur = seg.to;
+      continue;
+    }
+    for (let k = 1; k <= per; k++) {
+      const t = k / per;
+      pts.push(
+        seg.kind === "Q" ? pointOnQuad(cur, seg.c, seg.to, t) : pointAt([cur, seg.c1, seg.c2, seg.to], t),
+      );
+    }
+    cur = seg.to;
+  }
+  return pts;
+};
+
+/**
+ * 环上的点按 1 位小数**定死**——`pathD` 写下的与命中环用的是同一批数字。
+ * 不这样做的后果是可量化的：渲染按 `fmt` 取整、命中按全精度算，两边界能差 0.05 设计 px，
+ * 于是"画出来的像素必须命中"这条断言会在边界上随机红（4-2 第 2 轮的 R-14 就是这么暴露的）。
+ */
+const roundRing = (pts: Point[]): Point[] => pts.map((p) => at(round1(p.x), round1(p.y)));
+
+/** 闭合折线 → `d`（全绝对 `L`）：渲染出来的就是这条折线本身，不再有第二份曲线真值。 */
+const ringToPathD = (ring: Point[]): string =>
+  `M${ring.map((p, i) => `${i === 0 ? "" : "L"}${fmt(p.x)} ${fmt(p.y)}`).join(" ")}Z`;
 
 // ── 头部与耳（DESIGN_TOKENS §10：头部椭圆圆心 (160,140)、rx100/ry92）────────────────────────
 const HEAD: Ellipse = { cx: 160, cy: 140, rx: 100, ry: 92 };
@@ -149,17 +208,35 @@ const EYELIDS: [EyeLidShape, EyeLidShape] = [
 
 // ── 躯干与腿（§10：钟形、底宽 ±74、底沿 y≈352；前腿宽 38、y 262→344、下方半圆收脚）──────────
 /**
- * 躯干顶边 y=150 藏在头部椭圆里（M3·⑥ 的"无颈"判据 = 两个顶角都满足椭圆方程 < 1）。
- * 头身比的抓手就是它：躯干高 = 352 − 150 = 202，头高 = 2×92 = 184 → 202 ÷ 184 = 1.098 ≈ 1:1.1。
+ * 躯干轮廓（结构化段 → 现算 `pathD` 与命中环，§4 的"单一事实源"）。
+ *
+ * 为什么不再是一条手写 `d` 字符串（4-2 第 2 轮的 R-12）：命中要求"命中的就是画出来的"，
+ * 而"画出来的"只能有一份真值。从前 `pathD` 是字符串、命中盒是另算的矩形，两者必然漂移——
+ * 矩形死区实测占窗口 7.12%（真渲染口径）。现在曲线先按 `TORSO_SAMPLES` **折线化**，
+ * 折线化的结果既是渲染的 `d`、也是命中环，逐点同一。
+ * 16 点/曲线的弦长约 9 设计 px、矢高 ≈0.05 设计 px（= 0.04 CSS px）：肉眼与渲染都看不出来。
+ *
+ * 顶边 y=150 藏在头部椭圆里（M3·⑥ 的"无颈"判据 = 两个顶角都满足椭圆方程 < 1），
+ * 段序列的终点 (210,150) 与起点 (110,150) 之间的闭合线就是那条顶边。
+ * 头身比的抓手：躯干高 = 352 − 150 = 202，头高 = 2×92 = 184 → 202 ÷ 184 = 1.098 ≈ 1:1.1。
  */
+const TORSO_START = at(110, 150);
+const TORSO_SAMPLES = 16;
+const TORSO_SEGS: readonly Seg[] = [
+  // 底角用二次贝塞尔收圆：起点切线竖直、终点切线水平 → 与侧边、底边都平滑相接
+  { kind: "C", c1: at(96, 200), c2: at(86, 268), to: at(86, 336) },
+  { kind: "Q", c: at(86, 352), to: at(100, 352) },
+  { kind: "L", to: at(220, 352) },
+  { kind: "Q", c: at(234, 352), to: at(234, 336) },
+  { kind: "C", c1: at(234, 268), c2: at(224, 200), to: at(210, 150) },
+];
+const TORSO_RING = roundRing(sampleSegs(TORSO_START, TORSO_SEGS, TORSO_SAMPLES));
 const TORSO: TorsoShape = {
-  topY: 150,
+  topY: TORSO_START.y,
   topHalfWidth: 50,
   bottomY: 352,
   bottomHalfWidth: 74,
-  // 底角用二次贝塞尔收圆：起点切线竖直、终点切线水平 → 与侧边、底边都平滑相接
-  pathD:
-    "M110 150 C96 200 86 268 86 336 Q86 352 100 352 L220 352 Q234 352 234 336 C234 268 224 200 210 150 Z",
+  pathD: ringToPathD(TORSO_RING),
 };
 const LEGS: [{ pathD: string }, { pathD: string }] = [
   // 脚底 = 330 + 0.75×18 = 343.5（§10 写"y→344"）：普通三次贝塞尔在 t=0.5 处只走到控制点高度的 3/4
@@ -168,7 +245,6 @@ const LEGS: [{ pathD: string }, { pathD: string }] = [
 ];
 
 // ── 尾巴（§10：根部宽 30 → 尖端宽 10、自身体右下向右上兜回、目标弧长 408）────────────────────
-type Cubic = readonly [Point, Point, Point, Point];
 /**
  * 两段三次贝塞尔。控制点是**试出来的**，三条判据都在会话内探针里量过（`%TEMP%\geom-probe*.mjs`）：
  * ① 采样弧长 408.0（= 声明的 `lengthPx`，Δ0.00%）；② 锥形轮廓留在画布内（最右 314.9 < 320）；
@@ -182,14 +258,6 @@ const TAIL_ROOT_HALF = 15;
 const TAIL_TIP_HALF = 5;
 /** 每段采样数：16 点时弦长约 12.7px、矢高 ≈0.2px（肉眼不可见），再密只是把 `pathD` 撑长。 */
 const TAIL_OUTLINE_SAMPLES = 16;
-
-const pointAt = ([p0, p1, p2, p3]: Cubic, t: number): Point => {
-  const u = 1 - t;
-  return {
-    x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
-    y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
-  };
-};
 
 const sampleCubics = (curve: readonly Cubic[], perSegment: number): Point[] => {
   const pts: Point[] = [];
@@ -212,7 +280,7 @@ const pathDFrom = (curve: readonly Cubic[]): string => {
 };
 
 /** 沿中心线的法线把宽度从根到尖线性收掉，得到一个封闭的锥形实体（§10 的"锥形实体"画法）。 */
-const taperedOutlineD = (center: readonly Point[], rootHalf: number, tipHalf: number): string => {
+const taperedRing = (center: readonly Point[], rootHalf: number, tipHalf: number): Point[] => {
   const left: Point[] = [];
   const right: Point[] = [];
   const last = center.length - 1;
@@ -227,17 +295,18 @@ const taperedOutlineD = (center: readonly Point[], rootHalf: number, tipHalf: nu
     left.push(at(center[i].x - (dy / norm) * half, center[i].y + (dx / norm) * half));
     right.push(at(center[i].x + (dy / norm) * half, center[i].y - (dx / norm) * half));
   }
-  const ring = left.concat(right.reverse());
-  return `M${ring.map((p, i) => `${i === 0 ? "" : "L"}${fmt(p.x)} ${fmt(p.y)}`).join(" ")}Z`;
+  return left.concat(right.reverse());
 };
 
 const TAIL_CENTER = sampleCubics(TAIL_CURVE, TAIL_OUTLINE_SAMPLES);
+/** 环上的点与 `outlineD` 写下的是同一批数字（`roundRing`）→ 渲染的轮廓就是命中环（R-12）。 */
+const TAIL_RING = roundRing(taperedRing(TAIL_CENTER, TAIL_ROOT_HALF, TAIL_TIP_HALF));
 const TAIL: TailShape = {
   rootX: TAIL_CURVE[0][0].x,
   rootY: TAIL_CURVE[0][0].y,
   lengthPx: 408,
   pathD: pathDFrom(TAIL_CURVE),
-  outlineD: taperedOutlineD(TAIL_CENTER, TAIL_ROOT_HALF, TAIL_TIP_HALF),
+  outlineD: ringToPathD(TAIL_RING),
 };
 
 // ── 对外契约（DESIGN §3.5 的三个导出名，一个不改）──────────────────────────────────────────
@@ -262,72 +331,120 @@ const RIM_HALF = 2;
 /** 设计坐标 → CSS px（只做比例换算；外扩各形状自己加）。 */
 const css = (design: number): number => design * DESIGN_TO_CSS;
 
-/** 顶点沿"顶点 → 重心"方向外扩 `by`（设计坐标）：描边有一半画在填充之外，不扩就漏一条边。 */
-const dilateTriangle = (t: EarShape, by: number): { a: Point; b: Point; c: Point } => {
-  const v = [t.tip, t.outer, t.inner];
-  const centroid = at((v[0].x + v[1].x + v[2].x) / 3, (v[0].y + v[1].y + v[2].y) / 3);
-  const out = v.map((p) => {
-    const dx = p.x - centroid.x;
-    const dy = p.y - centroid.y;
-    const len = Math.hypot(dx, dy) || 1;
-    return at(p.x + (dx / len) * by, p.y + (dy / len) * by);
-  });
-  return { a: out[0], b: out[1], c: out[2] };
-};
+/** 尾根（设计坐标）：尾巴绕它摆 ±8°（`heicat.css` 的 `tailSway` + `HeiCat.tsx` 内联的 `transform-origin`）。 */
+const TAIL_PIVOT = at(TAIL.rootX, TAIL.rootY);
 
-/** 设计坐标的外接矩形 → **向外取整**的 CSS px 矩形盒（躯干与尾段用）。 */
-const rectBox = (x0: number, y0: number, x1: number, y1: number): Bounds => {
-  const left = Math.floor(x0 * DESIGN_TO_CSS);
-  const top = Math.floor(y0 * DESIGN_TO_CSS);
-  // 向外取整：只许多盖、不许漏盖（漏一条边 = 猫身上有像素不响应拖拽）
-  return {
-    shape: "rect",
-    x: left,
-    y: top,
-    width: Math.ceil(x1 * DESIGN_TO_CSS) - left,
-    height: Math.ceil(y1 * DESIGN_TO_CSS) - top,
-  };
-};
+/** 甩尾的周期与幅度 —— 取值由 `hitTest.test.ts` 的 M6·⑨ 逐项绑到 `heicat.css` 的 `tailSway` 上。 */
+export const TAIL_SWAY_MS = 2400;
+export const TAIL_SWAY_DEG = 8;
+/** `animation` 的时序函数（`cubic-bezier(0.2, 0, 0, 1)`）：CSS 动画把它作用在**每一段**关键帧上。 */
+export const TAIL_SWAY_EASING: readonly [number, number, number, number] = [0.2, 0, 0, 1];
+/** 关键帧停点：[周期占比, 角度]。0% → 0°、25% → −8°、75% → +8°、100% → 0°（首末中性，`reduce` 播完不跳变）。 */
+const SWAY_STOPS: readonly (readonly [number, number])[] = [
+  [0, 0],
+  [0.25, -TAIL_SWAY_DEG],
+  [0.75, TAIL_SWAY_DEG],
+  [1, 0],
+];
 
-/**
- * 尾巴的命中盒：尾巴不是一根直棍（它贴着右边缘兜回来），一个大盒会把"尾巴弯里那块透明区"
- * 整块吃掉 → 沿中心线切成 6 段、每段一个小盒。
- */
-const tailBoxes = (): Bounds[] => {
-  const out: Bounds[] = [];
-  const slices = 6;
-  const last = TAIL_CENTER.length - 1;
-  for (let i = 0; i < slices; i++) {
-    const from = Math.floor((i * last) / slices);
-    const to = Math.floor(((i + 1) * last) / slices);
-    const slice = TAIL_CENTER.slice(from, to + 1);
-    // 用段**起点**的半宽（尾巴越往上越细）→ 取到该段里最宽的那一档，宁可多盖
-    const half = TAIL_ROOT_HALF + (TAIL_TIP_HALF - TAIL_ROOT_HALF) * (from / last) + RIM_HALF;
-    out.push(
-      rectBox(
-        Math.min(...slice.map((p) => p.x)) - half,
-        Math.min(...slice.map((p) => p.y)) - half,
-        Math.max(...slice.map((p) => p.x)) + half,
-        Math.max(...slice.map((p) => p.y)) + half,
-      ),
-    );
+/** 解 `cubic-bezier(x1,y1,x2,y2)`：给定 x∈[0,1] 二分求参数 t 再取 y。20 次二分误差 <1e-6。 */
+const bezierAt = (x: number, [x1, y1, x2, y2]: readonly [number, number, number, number]): number => {
+  // 端点短路：二分只能收敛到 2.7e-13 这种量级，而关键帧**停点上的取值必须是精确的**
+  // （M6·⑨ 要断言 25% 恰好 = −8°）。两端本来就是精确值 y(0)=0 / y(1)=1。
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const curveX = (t: number): number => 3 * (1 - t) * (1 - t) * t * x1 + 3 * (1 - t) * t * t * x2 + t * t * t;
+  const curveY = (t: number): number => 3 * (1 - t) * (1 - t) * t * y1 + 3 * (1 - t) * t * t * y2 + t * t * t;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 20; i++) {
+    const mid = (lo + hi) / 2;
+    if (curveX(mid) < x) lo = mid;
+    else hi = mid;
   }
-  return out;
+  return curveY((lo + hi) / 2);
 };
 
 /**
- * 猫身的命中形状（批次 4 的 `isOverCharacter` 消费；批次 5 按 4-2 的 R-01 改成**精确形状**）：
- * 头 1 个椭圆 + 耳 2 个三角形 + 躯干 1 个矩形 + 尾 6 个矩形 = **10 个**。
+ * 尾巴在**动画时间轴**上的相位 → 摆动角（度）。纯函数，入参是 `.hei-tail` 那条 CSS 动画自己的
+ * `currentTime`（毫秒），不是 `performance.now()`——用动画的时钟才不会与屏幕上的猫错开。
  *
- * 为什么不是"头含耳一个大矩形"：第一版就是那么写的（`x 48..212 / y 19..189`），实测死区
- * **7740 CSS px² = 窗口面积 9.9%**——头顶上方那条带、两耳之间的空隙、椭圆四角全都什么都没画，
- * 落在它们上面既点不到背后的桌面图标、也拖不动猫（SCOPE §5 M6 的用户故事在那片像素上不成立），
- * 而旧探针的四个取样点全在盒外，拦不住。头与耳**本来就是精确几何体**（一个椭圆 + 两个三角形），
- * 把它们退化成矩形是白丢精度；躯干与尾段仍用矩形——那两块盒内基本是实心的（尾巴那 6 段就是为此切的）。
- * 每个形状都向外扩 `RIM_HALF`：描边有一半画在填充之外，不扩就漏一圈约 1.6 CSS px 的边缘。
+ * 为什么是"读动画时钟 + 自己映射"而不是直接读渲染值（4-2 第 2 轮实测，探针在 `%TEMP%\r3-pixels`）：
+ * 在这套 Chromium 上，**合成器动画**的当前值读不出来——`getComputedStyle(el).transform` 恒为
+ * `none`、Typed OM 同样、`getBoundingClientRect()` 不随动画变；只有 Web Animations API 的
+ * `currentTime` 在走（实测 200.026 → 400.018 → 600.01 → 800.002）。所以相位只能"取时间、自己映射"。
+ *
+ * 为什么这张映射表不算第二份真相（D12）：它没有独立取值——`hitTest.test.ts` 的 M6·⑨ 直接解析
+ * `heicat.css` 的 `tailSway`，把周期 / 四个停点 / 角度 / 缓动逐项与本文件的常量对齐；
+ * CSS 改了而这里没跟上，那条用例立刻红。
+ */
+export function tailSwayAngleAt(currentTimeMs: number): number {
+  if (!Number.isFinite(currentTimeMs)) return 0;
+  const phase = (((currentTimeMs % TAIL_SWAY_MS) + TAIL_SWAY_MS) % TAIL_SWAY_MS) / TAIL_SWAY_MS;
+  for (let i = 1; i < SWAY_STOPS.length; i++) {
+    const [endOffset, endAngle] = SWAY_STOPS[i];
+    if (phase > endOffset) continue;
+    const [startOffset, startAngle] = SWAY_STOPS[i - 1];
+    const span = endOffset - startOffset;
+    const local = span === 0 ? 1 : (phase - startOffset) / span;
+    const angle = startAngle + (endAngle - startAngle) * bezierAt(local, TAIL_SWAY_EASING);
+    // `0 × (−8)` 会得到 **−0**：它 `=== 0` 成立，却让 `assert.strictEqual(…, 0)`（SameValue）红。
+    // 归一掉，免得调用方多出一种"等于 0 但不等于 0"的取值。
+    return angle === 0 ? 0 : angle;
+  }
+  return 0;
+}
+
+/** 绕枢轴旋转（设计坐标）。非有限角度按 0 算——U3 的"禁 NaN 几何"在命中层同样成立。 */
+const rotateAbout = (p: Point, pivot: Point, deg: number): Point => {
+  if (!Number.isFinite(deg) || deg === 0) return p;
+  const rad = (deg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = p.x - pivot.x;
+  const dy = p.y - pivot.y;
+  return at(pivot.x + dx * cos - dy * sin, pivot.y + dx * sin + dy * cos);
+};
+
+/** 尾巴上离尾根最远的距离（CSS px，含描边）——旋转保距，所以它同时也是**任意摆角**下的上界。 */
+const TAIL_REACH_PX = css(
+  Math.max(...TAIL_RING.map((p) => Math.hypot(p.x - TAIL_PIVOT.x, p.y - TAIL_PIVOT.y))) + RIM_HALF,
+);
+
+/**
+ * 点是否**可能**落在尾巴上（CSS px）——用来决定"这一拍要不要去问 DOM 要动画相位"（R-13 的开销闸）。
+ * 判据是严格的：落在圈外的点按 0° 处理也不会误判，于是绝大多数帧一次 `getComputedStyle` 都不发
+ * ——空闲时每帧读一次动画属性会把合成器动画拉回主线程，正是 NFR P1（空闲 CPU ≤1%）要防的事。
+ */
+export const mayBeOnTail = (viewport: Point): boolean => {
+  const dx = viewport.x - css(TAIL_PIVOT.x);
+  const dy = viewport.y - css(TAIL_PIVOT.y);
+  return dx * dx + dy * dy <= TAIL_REACH_PX * TAIL_REACH_PX;
+};
+
+/**
+ * 猫身的命中形状（批次 4 的 `isOverCharacter` 消费；批次 5 按 R-01 换形状，本批按 R-12 去矩形）：
+ * 头 1 个椭圆 + 耳 2 个三角形 + 躯干 1 条轮廓 + 尾 1 条轮廓 = **5 个**。
+ *
+ * 三个"为什么不"（都是量出来的，不是审美）：
+ * - **为什么不合并成一个外接矩形**：第一版就是那么写的（`x 48..212 / y 19..189`），实测死区
+ *   **7740 CSS px² = 窗口 9.9%**——头顶那条带、两耳之间的空隙、椭圆四角什么都没画却吃住点击。
+ * - **为什么躯干/尾段也不能用矩形**：4-2 第 2 轮的 R-12。矩形是外接框，尾巴又是一条贴着右边缘
+ *   兜回来的曲线——"弯里那块透明区"整块被吃掉。当时切成 6 段小盒只是把 9.9% 压到 **7.12%**
+ *   （真渲染口径 5553 px），因为盒内大多是空的。现在直接用渲染的那条轮廓。
+ * - **为什么每个形状都要带 `rim`**：描边有一半画在填充之外（`stroke-width: 4` → 2 设计 px），
+ *   不带就是"看得见的边拖不动"（R-14 实测漏盖 256 px²，其中耳缘一圈约 1 CSS px 宽）。
+ *
+ * `tailRotationDeg` = 尾巴**当前**的摆动角（度，设计坐标下绕尾根）。命中环必须跟着动画转（R-13）：
+ * 静态模型的尾巴在 ±8° 两端时，有 1.48%~3.30% 的窗口面积"画出来了却判成透明"（点上去穿到桌面）。
+ * 这个入参是**纯入参**——真值由 `usePointerPassthrough` 每拍问 DOM 要（`mayBeOnTail` 先判要不要问），
+ * 这里不碰任何全局。
+ *
+ * 呼吸（`#body` 的 `scaleY(1.03)`）不必建模：躯干顶边 y=150 被抬起 6.06 设计 px 后仍在头部椭圆内
+ * （头后画、盖住那段），侧边只沿 y 缩放不改 x ⇒ 画出来的轮廓与静态命中环重合。
  * 三个部件各自成函数是为了守住 D14① 的函数 ≤50 行——改形状时本函数一度涨到 75 行。
  */
-export function characterBounds(): Bounds[] {
+export function characterBounds(tailRotationDeg = 0): Bounds[] {
   const rim = css(RIM_HALF);
   const head: Bounds = {
     shape: "ellipse",
@@ -336,24 +453,17 @@ export function characterBounds(): Bounds[] {
     rx: css(HEAD.rx) + rim,
     ry: css(HEAD.ry) + rim,
   };
-  const ears = EARS.map((e): Bounds => {
-    const t = dilateTriangle(e, RIM_HALF);
-    return {
-      shape: "triangle",
-      a: at(css(t.a.x), css(t.a.y)),
-      b: at(css(t.b.x), css(t.b.y)),
-      c: at(css(t.c.x), css(t.c.y)),
-    };
+  /** 设计坐标的环 → CSS px 的多边形（`rim` 一并带走：描边带是命中区域的一半）。 */
+  const ring = (design: Point[]): Bounds => ({
+    shape: "polygon",
+    points: design.map((p) => at(css(p.x), css(p.y))),
+    rim,
   });
+  const tailRing = TAIL_RING.map((p) => rotateAbout(p, TAIL_PIVOT, tailRotationDeg));
   return [
     head,
-    ...ears,
-    rectBox(
-      HEAD.cx - TORSO.bottomHalfWidth,
-      TORSO.topY,
-      HEAD.cx + TORSO.bottomHalfWidth,
-      TORSO.bottomY,
-    ),
-    ...tailBoxes(),
+    ...EARS.map((e) => ring([e.tip, e.outer, e.inner])),
+    ring(TORSO_RING),
+    ring(tailRing),
   ];
 }

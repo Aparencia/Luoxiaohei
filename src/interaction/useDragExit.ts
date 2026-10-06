@@ -11,7 +11,7 @@
 import { useState } from "react";
 import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { reportIpcFailure } from "./useCursorFollow.ts";
+import { noteIpcSuccess, reportIpcFailure } from "./useCursorFollow.ts";
 
 /** `React.MouseEvent` 里本模块真正读到的两个成员——结构类型让 Node 用例不必造合成事件（D14⑤）。 */
 export type PointerEventLike = { button: number; preventDefault: () => void };
@@ -26,6 +26,11 @@ export type DragExitPorts = {
   showQuitMenu: () => Promise<void>;
   /** 失败报告端口：共用的 E-IPC-01 落点（DESIGN §3.3 的格式，实现在 useCursorFollow.ts）。 */
   reportFailure: (command: string, error: unknown) => void;
+  /**
+   * 成功端口：解除该命令的静音。`UI.md` §2 S3 的判据是「**恢复后**再失败才再打」——
+   * 只压不解除 = 一次抖动之后这条链永久静音，第二段独立故障没有任何痕迹（4-2 第 2 轮的 R-16）。
+   */
+  noteSuccess: (command: string) => void;
 };
 
 const START_DRAGGING = "plugin:window|start_dragging";
@@ -50,6 +55,7 @@ export function createDragExit(ports: DragExitPorts): DragExitHandlers {
       dragging = true;
       void ports
         .startDragging()
+        .then(() => ports.noteSuccess(START_DRAGGING))
         .catch((error) => ports.reportFailure(START_DRAGGING, error))
         .finally(() => {
           dragging = false;
@@ -58,7 +64,10 @@ export function createDragExit(ports: DragExitPorts): DragExitHandlers {
     onContextMenu: (event) => {
       // 不 preventDefault 的话 WebView 自带的右键菜单会跟原生菜单一起冒出来（两个菜单叠在一起）
       event.preventDefault();
-      void ports.showQuitMenu().catch((error) => ports.reportFailure(MENU_COMMANDS, error));
+      void ports
+        .showQuitMenu()
+        .then(() => ports.noteSuccess(MENU_COMMANDS))
+        .catch((error) => ports.reportFailure(MENU_COMMANDS, error));
     },
   };
 }
@@ -74,7 +83,8 @@ export function createDragExit(ports: DragExitPorts): DragExitHandlers {
  * 关窗即退出进程：`close()` 是 `core:window:allow-close`（批次 1 已落），关掉唯一窗口 = 进程结束。
  */
 export function tauriDragExitPorts(): DragExitPorts {
-  const quit = (): Promise<void> => getCurrentWindow().close();
+  // 关窗成功也要解除静音（这条链的成功信号只在这里产生：菜单项的回调不在 ports 的接口上）
+  const quit = (): Promise<void> => getCurrentWindow().close().then(() => noteIpcSuccess(CLOSE_WINDOW));
   let menuPromise: Promise<Menu> | null = null;
   return {
     startDragging: () => getCurrentWindow().startDragging(),
@@ -97,6 +107,7 @@ export function tauriDragExitPorts(): DragExitPorts {
       await menu.popup();
     },
     reportFailure: reportIpcFailure,
+    noteSuccess: noteIpcSuccess,
   };
 }
 

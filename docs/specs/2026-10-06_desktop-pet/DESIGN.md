@@ -133,6 +133,7 @@ I7  req(menu|new) {"kind":"Menu","options":{"items":[…]},"handler":<Channel>} 
 
 - **不加** `core:window:allow-set-always-on-top` / `allow-set-skip-taskbar`：`alwaysOnTop` 与 `skipTaskbar` 由 `tauri.conf.json` 静态配置满足（M1），运行时不再调它们（NFR S2「不得保留未被调用的授权」）。
 - **`acl OK 4/4` 的口径（防 4-1 各写各的）**：该行断言的是**除 `core:default` 之外的 4 条具名授权**（`allow-close` / `allow-start-dragging` / `allow-set-ignore-cursor-events` / `core:menu:default`）；`permissions` **总数 = 5 条**（NFR S2 的上限）。测试打印 4 是因为 SCOPE §5 M2 的命令原文写的就是 4 条具名项，不是"总共有 4 条"。
+- **`core:menu:default` 与 `core:default` 的关系（4-2 的 S-13，就地留痕）**：本仓 `src-tauri/gen/schemas/acl-manifests.json` 里**没有** `core:default` 这个键（4-2 两轮都复现过），所以"它是否已经包含 `core:menu:default`"在本仓**无从判定**。此处把口径写死：这 5 条按**清单条数**计（NFR S2 的上限 5），不按"实际授予的权限条数"计。两种口径的差别落到动作上——若将来核到 `core:default` 已含菜单权限，删掉那一行会让清单变 4 条、`acl OK 4/4` 要跟着改；**核到之前保持显式列出**（多列一条不扩大实际权限面，少列一条却会让 I7 在运行时被 ACL 拒绝）。
 - **删除** `opener:default`：前端零引用（RESEARCH 2-4 卡实测，`git grep -n opener` 5 处全是脚手架注册点）→ 见 §4.3 退役清单。
 
 ### 3.3 错误码（新错误码，同批登记 `docs/registry/APIS.md`）
@@ -166,11 +167,17 @@ src/character/geometry.ts        （纯数据 + 纯查询，无副作用）
                                eyelidTravelPx: number; tail: { rootX: number; rootY: number; lengthPx: number; pathD: string };
                                // tail.lengthPx = 声明的目标弧长（408，设计坐标）；pathD 是 4-1 画的曲线，采样出的弧长 ≥ 1.20 × 体高才过 M3（见 DESIGN_TOKENS §10）
                                torsoOriginY: number }
-  export function characterBounds(): Bounds[]        // 输出换算到 CSS px（设计坐标 ×0.8125），与 screenToViewport 同一坐标系；供 hitTest 命中判定；纯函数
-  // ⚠️ **4-2 的 R-01 勘误（4-1 批次 5 落地）**：`Bounds` 从"轴对齐矩形"改成**形状联合**（rect / ellipse / triangle）——
-  //    头是椭圆、耳是三角形（两者本来就是精确几何体）、躯干与尾段仍是矩形，每个形状向外扩 `RIM_HALF`（描边的一半）。
-  //    照旧写法（"头含耳"一个外接矩形）实测死区 **7740 CSS px² = 窗口面积 9.9%**：那片像素什么都没画，
-  //    落在上面既点不到桌面也拖不动猫；改精确形状后死区 **0.00%**（判据 `M6·⑦` 兜住）
+  export function characterBounds(tailRotationDeg?: number): Bounds[]   // 输出换算到 CSS px（设计坐标 ×0.8125），与 screenToViewport 同一坐标系；供 hitTest 命中判定；纯函数
+  // ⚠️ **4-2 的 R-01/R-12/R-13 勘误（4-1 批次 5 换头耳、批次 6 去矩形 + 接相位）**：`Bounds` 是**形状联合**
+  //    （`ellipse` / `polygon`）——头是椭圆（半径各含描边半宽），其余部件是**渲染用的那条真实轮廓**
+  //    （`polygon.points`）加描边带（`polygon.rim`）；判定 = 填充内部 ∪ 到边界距离 ≤ rim
+  //    （对应 `heicat.css` 的 `stroke-linejoin: round`）。
+  //    死区的三轮**真渲染**实测（headless Edge 截图 + 洋红底逐像素）：8 个粗筛盒 7740 px²（9.9%）
+  //    → 只换头耳、躯干与尾仍是矩形 5553 px（7.119%）→ 去掉全部矩形 **0.000%**。
+  //    `tailRotationDeg` = 尾巴**当前**摆角：静态形状 + ±8° 常驻动画会让 1.48%~3.30% 的窗口面积反着判
+  //    （R-13）。真值由 `usePointerPassthrough` 每拍问动画时钟（`getAnimations()[0].currentTime`），
+  //    角度映射是纯函数 `tailSwayAngleAt`（常量由 `M6·⑨` 绑回 `heicat.css` 的关键帧）。
+  //    判据：`M6·⑦`（全窗口双向）/ `M6·⑧`（相位）/ `M6·⑨`（相位取值）
 
 src/interaction/gaze.ts          （纯函数）
   export const SAMPLE_HZ = 60                        // M5 验收命令断言这个常量

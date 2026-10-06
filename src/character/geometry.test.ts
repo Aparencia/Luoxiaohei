@@ -147,6 +147,17 @@ test("M3·④ 白色只出现在 2 处眼白（冻结断言，按元素计不按
     [],
     "TSX 里除了那 2 处眼白不许有别的色彩字面量（其余色值只许住在 heicat.css 的 :root，DESIGN_TOKENS §6）",
   );
+  // 4-2 第 2 轮的 R-07：只数次数的话，把白色挪到任何一个元素上都照样过——所以连**元素身份**一起钉。
+  // 口径仍是"按元素计数不按像素区域"（TESTPLAN KP-04），只是把元素名也变成判据。
+  const whiteTags = tsx.match(/<[a-z]+[^>]*fill="#FFFFFF"[^>]*>/g) ?? [];
+  assert.equal(whiteTags.length, 2, `带 fill="#FFFFFF" 的元素必须恰好 2 个，实测 ${whiteTags.length} 个`);
+  for (const tag of whiteTags) {
+    assert.match(
+      tag,
+      /className="hei-eye-white"/,
+      `白色必须画在眼白元素（.hei-eye-white）上，实测标签：${tag.replace(/\s+/g, " ")}`,
+    );
+  }
 });
 
 test("M3·⑤ 通体主色为黑：色板里除眼白外无亮色，且三个已删的旧色不复活", () => {
@@ -190,15 +201,16 @@ test("M3·⑥ 头身比 ≈ 1:1.1（无颈）且整体占位在窗口矩形内",
   }
   // 占位：characterBounds() 已经把设计坐标换算成 CSS px（×0.8125）——换算丢了这条就红
   const shapes = characterBounds();
-  // 形状是 4-2 的 R-01 之后的形态（椭圆 / 三角形 / 矩形）：先各自取外接框，再判它落在窗口里
+  // 形状是本批（4-2 第 2 轮的 R-12）之后的形态：1 个椭圆 + 4 条**真实轮廓**多边形。
+  // 这里取的是**外接框**，只用来判"有没有越出窗口"，不是命中判据（命中判据在 hitTest.ts，
+  // 用的是轮廓本身 + 描边带——矩形外接框正是 R-12 的死区来源）。
   const extent = (b: (typeof shapes)[number]): [number, number, number, number] => {
-    if (b.shape === "rect") return [b.x, b.y, b.x + b.width, b.y + b.height];
     if (b.shape === "ellipse") return [b.cx - b.rx, b.cy - b.ry, b.cx + b.rx, b.cy + b.ry];
     return [
-      Math.min(b.a.x, b.b.x, b.c.x),
-      Math.min(b.a.y, b.b.y, b.c.y),
-      Math.max(b.a.x, b.b.x, b.c.x),
-      Math.max(b.a.y, b.b.y, b.c.y),
+      Math.min(...b.points.map((p) => p.x)),
+      Math.min(...b.points.map((p) => p.y)),
+      Math.max(...b.points.map((p) => p.x)),
+      Math.max(...b.points.map((p) => p.y)),
     ];
   };
   const boxes = shapes.map(extent);

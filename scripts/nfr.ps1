@@ -127,17 +127,22 @@ function Check-Maintainability {
     # .ps1 一律 UTF-8 带 BOM：无 BOM 时 Windows PowerShell 5.1 按系统码页(GBK)读 → 中文判词乱码甚至 ParserError。
     # 这条不是理论：2026-10-06 本项目的 scripts/nfr.ps1 被一次编辑掉掉 BOM 后，`-ge` 里的 `≥` 变成 `鈮?`，
     # 脚本直接 ParserError 退出码 1，看起来像"阈值不达标"——仪器失败伪装成代码缺陷。故做成机器断言。
+    # 枚举口径为什么用 -Filter 而不是 -Include（4-2 第二轮复审 P3；本机实测）：`-Include` 只在同时给了 `-Recurse` 时才生效——
+    # `Get-ChildItem $root -File -Include *.ps1`（无 -Recurse）实测返回 **0 个**，且不报错不告警；于是「1 个 .ps1 全部带 BOM」
+    # 只覆盖了 scripts/nfr.ps1，根目录的 check/doctor/gate/orphans/security 五个被静默丢掉（判据是对的，覆盖面 1/6 = 假绿）。
+    # `-Filter` 由文件系统提供程序在枚举层过滤，不依赖 -Recurse；打印「已扫 N 个」是为了跟它的文件数对账，漏扫看得见。
     $ps1 = @()
-    $ps1 += Get-ChildItem (Join-Path $root 'scripts') -Recurse -File -Include *.ps1 -ErrorAction SilentlyContinue
-    $ps1 += Get-ChildItem $root -File -Include *.ps1 -ErrorAction SilentlyContinue
+    $ps1 += Get-ChildItem (Join-Path $root 'scripts') -Recurse -File -Filter *.ps1 -ErrorAction SilentlyContinue
+    $ps1 += Get-ChildItem $root -File -Filter *.ps1 -ErrorAction SilentlyContinue
+    $ps1 = @($ps1 | Sort-Object -Property FullName -Unique)   # 去重：将来若 scripts/ 换成根下子目录也不会重复计数
     $noBom = @()
     foreach ($f in $ps1) {
         $b = [IO.File]::ReadAllBytes($f.FullName)
         $hasBom = ($b.Length -ge 3) -and ($b[0] -eq 0xEF) -and ($b[1] -eq 0xBB) -and ($b[2] -eq 0xBF)
         if (-not $hasBom) { $noBom += $f.FullName.Substring($root.Length + 1) }
     }
-    if ($noBom.Count -eq 0) { Pass ("{0} 个 .ps1 全部 UTF-8 带 BOM" -f $ps1.Count) }
-    else { Fail ("以下 .ps1 缺 UTF-8 BOM（PS 5.1 会按系统码页读，中文判词乱码/解析失败）：{0}" -f ($noBom -join ', ')) }
+    if ($noBom.Count -eq 0) { Pass ("已扫 {0} 个 .ps1（scripts/ + 项目根），全部 UTF-8 带 BOM" -f $ps1.Count) }
+    else { Fail ("已扫 {0} 个 .ps1，其中以下 {1} 个缺 UTF-8 BOM（PS 5.1 会按系统码页读，中文判词乱码/解析失败）：{2}" -f $ps1.Count, $noBom.Count, ($noBom -join ', ')) }
 
     # 门禁本身必须绿——"写了测试"不等于"跑过"
     $gate = Join-Path $root 'check.ps1'
@@ -265,25 +270,198 @@ function Check-Availability {
     Cmp $grow $TH.LeakGrowthMB 'MB' ("长跑 {0} 分钟后工作集增长（峰值口径）" -f $mins)
 }
 
+# ================= availability · 启停循环的窗口判据（Win32 P/Invoke） =================
+# 为什么不能再用 `WaitForInputIdle` 当"窗口出现"（4-2 第二轮复审 P2；本机独立探针原文）：
+#   WaitForInputIdle = True   MainWindowHandle = 1640244   MainWindowTitle = []
+#   可见顶层窗口：hwnd=1640244 rect=0,0,16,16 area=256 class='Tao Thread Event Target'；4.3 s 后 exitcode = 0xC0000409
+# 那个 True 指的是 tao 的 16×16 事件靶窗（与 STATE.md 风险摘要 ㊳ 同形），不是一个可见主窗口（tauri.conf.json 的 title 实测为空），
+# 于是原判据把「窗口没出现」「进程自己崩了」「被杀才退出」三种真实失败全记成成功。下面两条硬判据把"窗口"钉死：
+#   ① 面积 ≥ 40000 px²：靶窗只有 16×16 = 256 px²，而本应用的窗口是数百像素量级 ⇒ 40000 ≈ 200×200，正常窗口不会误伤（宁漏判不假红）；
+#   ② 类名 ≠ 'Tao Thread Event Target'：该靶窗可见且同属本进程，是已实测的唯一假阳性来源——按类名排它比按面积猜更稳（面积随 DPI 漂移，类名不）。
+function Initialize-NfrWindowApi {
+    if ('NfrWin32' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+// 只枚举"本进程的可见顶层窗口"；面积/类名的筛选放在 PowerShell 侧，落选窗口也能原样进诊断行（判据失败时要看得见探到了什么）。
+public class NfrWin32 {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder s, int max);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    public static List<string[]> VisibleWindows(uint pid) {
+        List<string[]> found = new List<string[]>();
+        EnumWindows(delegate(IntPtr h, IntPtr l) {
+            uint wpid; GetWindowThreadProcessId(h, out wpid);
+            if (wpid == pid && IsWindowVisible(h)) {
+                RECT r; GetWindowRect(h, out r);
+                StringBuilder c = new StringBuilder(256); GetClassName(h, c, 256);
+                found.Add(new string[] { h.ToInt64().ToString(), c.ToString(), ((r.Right - r.Left) * (r.Bottom - r.Top)).ToString() });
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+}
+'@
+}
+
+$script:MinWindowAreaPx = 40000
+$script:TaoEventWindowClass = 'Tao Thread Event Target'
+$script:lastWinDump = ''    # 进程存活期间最后一次"看到了窗口但不合格"的快照，只用于失败诊断
+# 窗口等待上界：这是**仪器上界**，不是新阈值——NFR P3 的「启动到窗口可见 ≤ 6.0 s」才是阈值，10 s 取它的 ~1.7 倍余量
+$script:WindowAppearMs = 10000
+# 请它自己退的宽限：WM_CLOSE 之后最多等这么久，超时才算"非正常退出"（强杀只做收尾，不参与判净）
+$script:GracefulExitMs = 5000
+
+function Get-AppWindows([int]$processId) {
+    Initialize-NfrWindowApi
+    $out = @()
+    foreach ($w in [NfrWin32]::VisibleWindows([uint32]$processId)) {
+        $out += [pscustomobject]@{ Handle = [IntPtr][int64]$w[0]; Class = $w[1]; Area = [int]$w[2] }
+    }
+    return $out
+}
+function Format-AppWindows($wins) {
+    # 必须先滤掉 $null：PowerShell 的 `@($null)` 是**1 个元素**（不是 0 个）——函数返回空时
+    # 参数位上的 `(Get-AppWindows ...)` 求值成 $null，不过滤就会打出 "  px²" 这种空壳诊断（本机踩过一次）。
+    $list = @($wins | Where-Object { $null -ne $_ })
+    if ($list.Count -eq 0) { return '无可见顶层窗口' }
+    return (@($list | ForEach-Object { "{0} {1} px²" -f $_.Class, $_.Area }) -join ' ｜ ')
+}
+# 等真窗口出现。进程自己先退出就提前收手（"不会再出现"是确定的，没必要干等满超时——本机单次崩溃实测 4.3~19.8 s 不等）
+function Wait-AppWindow([System.Diagnostics.Process]$p, [int]$timeoutMs) {
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while ($sw.Elapsed.TotalMilliseconds -lt $timeoutMs) {
+        $wins = @(Get-AppWindows $p.Id)
+        if ($wins.Count -gt 0) { $script:lastWinDump = Format-AppWindows $wins }
+        foreach ($w in $wins) {
+            if ($w.Area -ge $script:MinWindowAreaPx -and $w.Class -ne $script:TaoEventWindowClass) { return $w }
+        }
+        try { $p.Refresh() } catch { return $null }
+        if ($p.HasExited) { return $null }
+        Start-Sleep -Milliseconds 100
+    }
+    return $null
+}
+
 function Check-LaunchCycle {
     Say '--' 'availability · 启停循环'
     if (-not (Test-Path $exe)) { Env "未找到 $exe"; return }
-    $fail = 0
+
+    # 失败三类分开计（复审要求：100 次里哪一类失败必须看得出来）：① 窗口未出现 ② 非正常退出（含 ExitCode ≠ 0）③ 残留进程。
+    # 一个循环最多归一类，优先级 ① > ② > ③——① 是根因时 ② 通常只是它的下游（进程崩了当然也没法"干净退出"），拆开记等于同一件事数两遍。
+    # 这样保证「三类之和 = 失败循环数 = K」，最后那行「成功 M 次 = N − K」才自洽（否则一次循环记两笔，M 会算成负数）。
+    $noWindow = 0; $badExit = 0; $leftover = 0
+    $exitCodes = @{}
+    $detailPrinted = $false
+
     for ($i = 1; $i -le $Launches; $i++) {
+        $script:lastWinDump = ''
+        $p = $null
         try {
             $psi2 = New-Object System.Diagnostics.ProcessStartInfo
             $psi2.FileName = $exe
             $psi2.UseShellExecute = $true
+            $psi2.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
             $p = [System.Diagnostics.Process]::Start($psi2)
-            $ok = $p.WaitForInputIdle(5000)
-            if (-not $ok) { $fail++ }
-            Stop-App
-            if (-not $p.HasExited) { $p.Kill(); $fail++ }
-        } catch { $fail++ }
-        if (($i % 10) -eq 0) { Say 'i' ("已完成 {0}/{1} 次，失败 {2} 次" -f $i, $Launches, $fail) }
+        } catch { $p = $null }
+
+        # ---- 阶段 1：窗口出现（硬判据见文件上方那段 Why）----
+        $win = $null
+        if ($p) { $win = Wait-AppWindow $p $script:WindowAppearMs }
+        $winDump = if ($p) { Format-AppWindows (Get-AppWindows $p.Id) } else { '（进程根本没起来）' }
+        if ($winDump -eq '无可见顶层窗口' -and $script:lastWinDump) {
+            $winDump = "{0}（存活期间观测到，但不满足 面积 ≥ {1} px² 且 类名 ≠ 靶窗）" -f $script:lastWinDump, $script:MinWindowAreaPx
+        }
+
+        # ---- 阶段 2：退出（先请它自己退，再判干不干净）----
+        # 为什么不再"先强杀再看 HasExited"：NFR A2 要的是「**都干净退出**」。强杀之后再读 HasExited，等于把
+        # "被杀才退出"记成成功——那是我们自己动的手，不是应用自己退的，证明不了任何事。
+        $exitNote = ''
+        if ($p) {
+            $dead = $true
+            try { $p.Refresh(); $dead = $p.HasExited } catch { $dead = $true }
+            if ($dead) { $exitNote = '未收到关闭请求就自行退出（崩溃/被杀）' }
+            else {
+                # WM_CLOSE 发给**枚举到的真窗口**句柄，而不是 `$p.CloseMainWindow()`：本机实测 MainWindowHandle 指的就是那个
+                # 16×16 靶窗，对靶窗发 WM_CLOSE 不会让应用退出 ⇒ 判据会变成假超时。
+                $signalled = $false
+                if ($win) { $signalled = [NfrWin32]::PostMessage($win.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
+                if (-not $signalled) { try { $signalled = $p.CloseMainWindow() } catch { $signalled = $false } }
+                if (-not $signalled) { $exitNote = '没有可发 WM_CLOSE 的窗口句柄' }
+                else {
+                    $sw2 = [Diagnostics.Stopwatch]::StartNew()
+                    while ($sw2.Elapsed.TotalMilliseconds -lt $script:GracefulExitMs) {
+                        try { $p.Refresh() } catch { break }
+                        if ($p.HasExited) { break }
+                        Start-Sleep -Milliseconds 100
+                    }
+                    $sw2.Stop()
+                    if (-not $p.HasExited) { $exitNote = ('WM_CLOSE 后 {0} ms 内未退出' -f $script:GracefulExitMs) }
+                }
+            }
+            if ($p.HasExited) {
+                # 退出码留档：0xC0000409 这类"崩溃"与"被 WM_CLOSE 正常关闭"在这一行里区分得出来
+                $code = $null
+                try { $code = $p.ExitCode } catch { $code = $null }
+                if ($null -ne $code) {
+                    $key = '0x{0:X8}' -f $code
+                    if (-not $exitCodes.ContainsKey($key)) { $exitCodes[$key] = 0 }
+                    $exitCodes[$key]++
+                    if (-not $exitNote -and $code -ne 0) { $exitNote = "退出码 $key（非 0）" }
+                }
+            }
+        }
+
+        # ---- 阶段 3：收尾兜底 + 残留 ----
+        # 强杀只在这里出现，且**改不了阶段 2 的结论**：超时没退 / 窗口都没出现时不能把进程留在机器上，但 Kill 这个动作
+        # 本身不算"干净退出"，也不额外记一笔失败（失败已在 $win / $exitNote 里记过）。3000 ms 是等强杀收干净的宽限。
+        $residual = $false
+        if ($p) {
+            try { $p.Refresh() } catch { }
+            if (-not $p.HasExited) {
+                foreach ($cid in (Get-ProcessTree $p.Id)) { Stop-Process -Id $cid -Force -ErrorAction SilentlyContinue }
+            }
+            $sw3 = [Diagnostics.Stopwatch]::StartNew()
+            while ($sw3.Elapsed.TotalMilliseconds -lt 3000) {
+                if (-not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)) { break }
+                Start-Sleep -Milliseconds 100
+            }
+            # 残留按 PID + 进程名双查：PID 会被系统复用，而 NFR A4 已定"同时只允许 1 个应用进程组"，此刻还有同名进程 = 本轮没清干净
+            if (Get-Process -Id $p.Id -ErrorAction SilentlyContinue) { $residual = $true }
+            elseif (@(Get-Process -Name $procName -ErrorAction SilentlyContinue).Count -gt 0) { $residual = $true }
+        }
+
+        # ---- 归类：一个循环只记一笔，三类之和 = 失败循环数 ----
+        if (-not $win) { $noWindow++ }
+        elseif ($exitNote) { $badExit++ }
+        elseif ($residual) { $leftover++ }
+
+        if ((-not $win) -or $exitNote -or $residual) {
+            if (-not $detailPrinted) {
+                $detailPrinted = $true
+                $why = if ($exitNote) { $exitNote } else { '正常' }
+                Say 'i' ("首个失败循环 #{0} 现场：可见顶层窗口 = {1}；退出 = {2}；残留进程 = {3}" -f $i, $winDump, $why, $residual)
+            }
+        }
+        if (($i % 10) -eq 0) { Say 'i' ("已完成 {0}/{1} 次（窗口未出现 {2} / 非正常退出 {3} / 残留进程 {4}）" -f $i, $Launches, $noWindow, $badExit, $leftover) }
     }
-    $cnt = $Launches - $fail
-    Cmp $fail $TH.LaunchFailuresMax '次' ("{0} 次启动/退出循环的失败次数（成功 {1} 次）" -f $Launches, $cnt)
+
+    $k = $noWindow + $badExit + $leftover
+    Say 'i' ("失败分项：窗口未出现 {0} 次 ｜ 非正常退出 {1} 次 ｜ 残留进程 {2} 次（三项之和 = {3} = 失败循环数）" -f $noWindow, $badExit, $leftover, $k)
+    if ($exitCodes.Count -gt 0) {
+        $pairs = @($exitCodes.GetEnumerator() | Sort-Object -Property Name | ForEach-Object { "{0} × {1} 次" -f $_.Key, $_.Value })
+        Say 'i' ("本轮观测到的进程退出码：{0}（0x00000000 之外都算非正常退出）" -f ($pairs -join '、'))
+    }
+    $cnt = $Launches - $k
+    Cmp $k $TH.LaunchFailuresMax '次' ("{0} 次启动/退出循环的失败次数（成功 {1} 次）" -f $Launches, $cnt)
 }
 
 # ================= 主流程 =================

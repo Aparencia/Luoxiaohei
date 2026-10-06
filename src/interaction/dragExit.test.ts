@@ -314,3 +314,56 @@ test("KP-15 E-IPC-01 去重：同一处连续失败只留一条痕迹，恢复�
   );
   console.log(`KP-15 60 拍同因失败 → ${1} 条；恢复后再失败 → ${2} 条；另一条链 → ${3} 条（共 ${lines.length} 条）`);
 });
+
+test("KP-16 非周期命令的成功路径也解除静音（R-16 的靶子）", async () => {
+  await installIpc();
+  const { createDragExit } = await loadDragExit();
+  const { createPassthrough } = await loadPassthrough();
+  const ok: string[] = [];
+  const failed = (_command: string, error: unknown): never => {
+    throw error;
+  };
+
+  // 去重的一半是"记得解除"：只压不解除 = 一次抖动之后这条链永久静音，第二段独立故障没有痕迹。
+  // 四条非周期链（start_dragging / close / menu / set_ignore）本来就不会刷屏，但它们照样要解除。
+  const exit = createDragExit({
+    startDragging: () => Promise.resolve(),
+    showQuitMenu: () => Promise.resolve(),
+    reportFailure: failed,
+    noteSuccess: (command) => ok.push(command),
+  });
+  exit.onMouseDown({ button: 0, preventDefault: noop });
+  exit.onContextMenu({ button: 2, preventDefault: noop });
+  await settle();
+  assert.deepEqual(
+    ok,
+    ["plugin:window|start_dragging", "plugin:menu|new 或 plugin:menu|popup"],
+    `拖拽与菜单成功各要解除一条，实测 ${JSON.stringify(ok)}`,
+  );
+
+  const flipped: boolean[] = [];
+  const passthrough = createPassthrough({
+    setIgnore: (ignore) => {
+      flipped.push(ignore);
+      return Promise.resolve();
+    },
+    reportFailure: failed,
+    readTailRotation: () => 0,
+    noteSuccess: (command) => ok.push(command),
+  });
+  passthrough.update({ x: 4, y: 4 }, { x: 0, y: 0 }, 1); // (4,4) 在透明区 → 翻转一次
+  await settle();
+  assert.deepEqual(flipped, [true], "透明区必须翻成 ignore=true（否则这台用例没在测翻转）");
+  assert.ok(
+    ok.includes("plugin:window|set_ignore_cursor_events"),
+    `穿透开关成功也要解除静音，实测 ${JSON.stringify(ok)}`,
+  );
+
+  // 第四条链（close）的成功信号只产生在真端口里（菜单项回调拿不到 ports），结构断言兜住它
+  const source = readFileSync(new URL("./useDragExit.ts", import.meta.url), "utf8");
+  assert.ok(
+    source.includes("noteIpcSuccess(CLOSE_WINDOW)"),
+    "close 成功必须解除静音：这条链的失败痕迹否则永远只有第一条",
+  );
+  console.log(`KP-16 成功解除静音的链：${ok.join(" / ")}`);
+});

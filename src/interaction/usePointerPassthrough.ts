@@ -12,10 +12,10 @@
 // 放进 state 会让 App 每次穿越猫身边界都重渲染一次，而渲染结果完全一样（D12：不产生行为差异的状态删掉）。
 import { useEffect, useMemo } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { characterBounds } from "../character/geometry.ts";
+import { characterBounds, mayBeOnTail, tailSwayAngleAt } from "../character/geometry.ts";
 import type { Bounds, Point } from "../character/geometry.ts";
 import { isOverCharacter, screenToViewport } from "./hitTest.ts";
-import { reportIpcFailure } from "./useCursorFollow.ts";
+import { noteIpcSuccess, reportIpcFailure } from "./useCursorFollow.ts";
 
 const SET_IGNORE = "plugin:window|set_ignore_cursor_events";
 
@@ -24,6 +24,13 @@ export type PassthroughPorts = {
   setIgnore: (ignore: boolean) => Promise<void>;
   /** 失败报告端口：共用的 E-IPC-01 落点（DESIGN §3.3 的格式，实现在 useCursorFollow.ts）。 */
   reportFailure: (command: string, error: unknown) => void;
+  /**
+   * 尾巴**当前**的摆动角（度，绕尾根）。命中环要跟着 CSS 动画转（4-2 第 2 轮的 R-13）。
+   * 只在这一拍的光标可能落在尾巴上时才会被调用（`mayBeOnTail` 先判）——空闲时一次样式读都不发。
+   */
+  readTailRotation: () => number;
+  /** 成功端口：解除该命令的静音（`UI.md` §2 S3「恢复后再失败才再打」的另一半，4-2 的 R-16）。 */
+  noteSuccess: (command: string) => void;
 };
 
 export type PassthroughController = {
@@ -33,28 +40,69 @@ export type PassthroughController = {
 
 /**
  * 穿透开关的状态机（纯逻辑 + 注入副作用）。
- * `bounds` 可注入只是为了测试能喂固定盒子；生产路径用 `characterBounds()` 的默认值。
+ * `boundsFor` 可注入只是为了测试能喂固定形状；生产路径用 `characterBounds()` 的默认值。
+ * 它收**摆角**（而不是直接收一组 `Bounds`）是因为命中区域依赖动画相位：尾巴甩到两端时
+ * 静态轮廓与画出来的尾巴差 1.48%~3.30% 的窗口面积，那几帧点得中/点不中全看这个入参。
  */
 export function createPassthrough(
   ports: PassthroughPorts,
-  bounds: Bounds[] = characterBounds(),
+  boundsFor: (tailRotationDeg: number) => Bounds[] = characterBounds,
 ): PassthroughController {
   // `null` = 还没下发过（首拍必定下发一次）；此后它就是"窗口当前的实际取值"
   let applied: boolean | null = null;
+  // 摆角没变就复用上一组形状：光标不在尾巴附近时（绝大多数帧）恒为 0°，于是每拍零分配
+  let cachedDeg: number | null = null;
+  let cached: Bounds[] = [];
+  const boundsAt = (deg: number): Bounds[] => {
+    if (cachedDeg !== deg) {
+      cachedDeg = deg;
+      cached = boundsFor(deg);
+    }
+    return cached;
+  };
   return {
     update: (cursorScreen, windowOrigin, scaleFactor) => {
       // E-IPC-02：坐标或窗口几何取不到 → **保持上一次取值**，不许翻成整窗穿透（DESIGN §3.3 明文）
       if (cursorScreen === null || windowOrigin === null) return;
       // U1：缩放读不到时不猜（猜错会让门限整体偏移）；下一拍读到再判定
       if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) return;
-      const over = isOverCharacter(screenToViewport(cursorScreen, windowOrigin, scaleFactor), bounds);
+      const viewport = screenToViewport(cursorScreen, windowOrigin, scaleFactor);
+      // 相位只在"点可能落在尾巴上"时才值得问（R-13）：旋转保距，圈外的点按 0° 判不会误判
+      const deg = mayBeOnTail(viewport) ? ports.readTailRotation() : 0;
+      const over = isOverCharacter(viewport, boundsAt(Number.isFinite(deg) ? deg : 0));
       if (over === applied) return; // 未翻转：这一次 IPC 根本不该发（KP-12 的判据本体）
       // 先记后发：失败也记（否则下一拍会重试，变成 60 次/秒的失败风暴）。功能失效由门禁拦
       // （`acl OK 4/4` + `acl-callers`），不靠运行时兜（DESIGN §3.3 的 E-IPC-01 处置）。
       applied = over;
-      void ports.setIgnore(!over).catch((error) => ports.reportFailure(SET_IGNORE, error));
+      void ports
+        .setIgnore(!over)
+        .then(() => ports.noteSuccess(SET_IGNORE))
+        .catch((error) => ports.reportFailure(SET_IGNORE, error));
     },
   };
+}
+
+/**
+ * 尾巴当前的旋转角（度）：问**动画自己的时钟**，不在 JS 里另起一份相位。
+ *
+ * 为什么必须问浏览器（R-13）：±8° 的摆动是 CSS 动画（`heicat.css` 的 `tailSway`，MOTION §2），
+ * 相位由浏览器的动画时间轴持有。在 JS 里按 `performance.now()` 复算一遍就会与屏幕上的猫错开
+ * （动画在文档时间轴上跑，页签被节流或机器休眠时两者不同步）——错开的表现是"看得见的尾巴点不动"。
+ *
+ * 为什么取 `currentTime` 而不是渲染值（4-2 第 2 轮实测，探针在 `%TEMP%\r3-pixels`）：
+ * 这套 Chromium 里**合成器动画**的当前值读不出来——`getComputedStyle(el).transform` 恒为 `none`、
+ * Typed OM 同样、`getBoundingClientRect()` 也不随动画变；只有 Web Animations API 的
+ * `currentTime` 在走（实测 200.026 → 400.018 → 600.01 → 800.002）。角度由 `tailSwayAngleAt`
+ * 这个纯函数映射，而它的常量被 M6·⑨ 逐项绑回 `heicat.css` 的关键帧。
+ *
+ * 读不到（元素还没挂上 / Node 里没有 DOM / `reduce` 分支下动画不存在 / `currentTime` 不是数字）
+ * 一律回 0 = **静态模型** = 本批之前的行为，不会比现在更差。
+ */
+function readTailRotationDeg(): number {
+  if (typeof document === "undefined") return 0;
+  const tail = document.querySelector(".hei-tail");
+  const currentTime = tail?.getAnimations?.()[0]?.currentTime;
+  return typeof currentTime === "number" ? tailSwayAngleAt(currentTime) : 0;
 }
 
 /**
@@ -66,6 +114,8 @@ export function tauriPassthroughPorts(): PassthroughPorts {
   return {
     setIgnore: (ignore) => getCurrentWindow().setIgnoreCursorEvents(ignore),
     reportFailure: reportIpcFailure,
+    readTailRotation: readTailRotationDeg,
+    noteSuccess: noteIpcSuccess,
   };
 }
 
