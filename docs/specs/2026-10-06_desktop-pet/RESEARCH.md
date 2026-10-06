@@ -1,7 +1,7 @@
 # RESEARCH · 罗小黑桌面摆件 MVP（首个功能）
 
 > 产物寿命：**持久（进仓库）** ｜ 卡：**2-6 外部方案调研 → 2-1 功能调研**（2-6 为补跑，见「外部方案」节触发补记）｜ 母版：roadbook v0.9.0 / 规则版本 2026-10-05.2
-> 时间戳：开始 2026-10-06 ｜ 状态：**调研完成，等待裁决**
+> 时间戳：开始 2026-10-06 ｜ 状态：**调研完成，已裁决**（2026-10-06 用户回「采纳建议」；本文件保留当时的建议与证据，**终值以 `SCOPE.md` §10 与 `DESIGN.md` §3 为准**）
 > 上游：`docs/pool/IDEAS.md:5`（approved）→ `docs/decisions/IDEA_2026-10-06_罗小黑桌面宠物.md` → `docs/decisions/STACK_2026-10-06_桌面摆件技术栈.md`
 
 ---
@@ -10,9 +10,9 @@
 
 | 项 | 建议 | 用户裁决 |
 | :-- | :-- | :-- |
-| 方案 | **方案 A**（SVG + CSS 动画 + Tauri 核心窗口 API） | **待裁决** |
-| 档位 | **L** | **待裁决** |
-| 2-6 判定三值 | **自研** | **待裁决** |
+| 方案 | **方案 A**（SVG + CSS 动画 + Tauri 核心窗口 API） | **已采纳** |
+| 档位 | **L** | **已采纳**（→ L 档；连带 3-1 设计卡与 5-2 发布卡强制，5-2 按 STATE 裁剪记录走"本地演示级"） |
+| 2-6 判定三值 | **自研** | **已采纳** |
 
 ---
 
@@ -47,7 +47,7 @@
 | F7 | `core:window:default` **已含**：`outer_position` `cursor_position` `current_monitor` `is_always_on_top` | `tauri-v2.12.1` 标签 `crates/tauri/build.rs` 的 `(command, enabled_by_default)` 表 |
 | F8 | `core:window:default` **不含**（`false`）：`close` `set_always_on_top` `set_ignore_cursor_events` `start_dragging` `set_skip_taskbar` → **必须显式补进 capability** | 同 F7 |
 | F9 | 现 capability 只授了 `core:default` + `opener:default` → **上述 5 条命令当前全被 ACL 拦** | `src-tauri/capabilities/default.json:6-9` |
-| F10 | **`src-tauri/Cargo.lock` 不存在** → Rust 依赖从未编译过，首次 `tauri dev/build` 要现拉并编译全部 crate | `Test-Path` 实测返回 False |
+| F10 | ~~**`src-tauri/Cargo.lock` 不存在** → Rust 依赖从未编译过，首次 `tauri dev/build` 要现拉并编译全部 crate~~ **【已失效：2-4 卡首次构建后该文件已生成，2026-10-06 实测 4897 行；`gate.ps1` 判据 ⑥ 的 500 行上限会因此判红 → TD-001】** | `Test-Path` 实测（当时）返回 False |
 | F11 | **仓库里没有任何罗小黑形象素材**：`ref/` 目录不存在、IDEA 卡引用的半成品 `src/HeiCat.cs` 也已不存在 | `Test-Path` 实测均为 False |
 | F12 | 当前窗口是脚手架默认值：800×600、有边框、不透明、不置顶 | `src-tauri/tauri.conf.json:15-17` |
 | F13 | `git grep -n "greet"` 命中 10 处（`src-tauri/src/lib.rs` 3 + `src/App.tsx` 6 + `src/App.css` 1 + `docs/registry/COMPONENTS.md` 1） | `git grep` 原文 |
@@ -225,7 +225,7 @@ BongoCat 当前版本（v2.1.1）**整个 workspace 里没有任何 `tauri`/`wry
 | 文件 | 动作 | 依据 |
 | :-- | :-- | :-- |
 | `src-tauri/tauri.conf.json` | 改：窗口加 `transparent`/`decorations:false`/`alwaysOnTop`/`skipTaskbar`/`shadow:false`，尺寸改小 | F3/F4/F12 |
-| `src-tauri/capabilities/default.json` | 改：补 `core:window:allow-close`、`allow-set-always-on-top`、`allow-start-dragging`（+ 穿透则再加 `allow-set-ignore-cursor-events`） | F8/F9 |
+| `src-tauri/capabilities/default.json` | 改：**初判**补 `core:window:allow-close`、`allow-set-always-on-top`、`allow-start-dragging`（+ 穿透则再加 `allow-set-ignore-cursor-events`）→ **【终案 `DESIGN.md` §3.2：5 条 = `core:default` + `allow-close` + `allow-start-dragging` + `allow-set-ignore-cursor-events` + `core:menu:default`；`allow-set-always-on-top` / `allow-set-skip-taskbar` **不加**——`alwaysOnTop` / `skipTaskbar` 由 `tauri.conf.json` 静态满足，NFR S2 禁保留未被调用的授权；`core:menu:default` 是本初判**漏掉**的一条（原生右键菜单）】** | F8/F9 + `DESIGN.md` §3.2 |
 | `src-tauri/src/lib.rs` | 改：删 `greet` 演示命令 | F13 |
 | `src/App.tsx` | **整份替换**（脚手架演示页 → 摆件装配） | F13 |
 | `src/App.css` | **整份替换**（含 `#greet-input` 规则） | F13 |
@@ -280,11 +280,13 @@ BongoCat 当前版本（v2.1.1）**整个 workspace 里没有任何 `tauri`/`wry
 
 ## 11. 未决问题（等用户裁决）
 
+> **【2026-10-06 收口】Q1~Q6 全部已裁决**（用户回「采纳建议」）。下表保留**当时的建议原文**以便追溯，**终值以 `SCOPE.md` §10 与 `DESIGN.md` §3 为准**；与终值不一致的两条已就地标注（Q4）。
+
 | # | 问题 | 我的建议 |
 | :-- | :-- | :-- |
 | Q1 | **透明区的鼠标行为**：窗口矩形内、猫身之外的透明像素，要不要「鼠标穿透」（能点到它背后的桌面图标）？ | 建议**要穿透**——常驻摆件挡手是第一体验门槛；实现只在 JS 侧加一个轮询 hook。**代价**：约 +120 行，且依赖 A3 假设（未实测），须在 4-1 首批用最小实验先证伪/证实 |
-| Q2 | **形象素材从哪来**：仓库里已无任何参考图（F11）。你重新给图，还是我按 IDEA 卡描述（纯黑大色块 + 巨型白眼白 + 黑瞳孔 + 长尾）自行设计矢量？ | 建议**你先给图**——还原度是本项目的核心目标 |
-| Q3 | **窗口尺寸与构图**：建议 260×300 逻辑像素、猫占满宽度、底部留 8px 甩尾余量。（真实世界样本 `CoPet` 用的是 164×189，可作对照） | 建议照此；可缩放档位留到后续 7-1 卡 |
-| Q4 | **瞳孔跟随的采样范围与频率**：全局跟随还是只在靠近窗口时跟？30Hz 还是 60Hz？ | 建议**全局跟随 + 30Hz**；鼠标离窗口过远时瞳孔回正 |
+| Q2 | **形象素材从哪来**：仓库里已无任何参考图（F11）。你重新给图，还是我按 IDEA 卡描述（纯黑大色块 + 巨型白眼白 + 黑瞳孔 + 长尾）自行设计矢量？ | 建议**你先给图**——还原度是本项目的核心目标。**【终案：用户 Q2 裁决改用网络检索公共设定，SCOPE §8 K1~K5 为准；未下载、未入库任何官方图片】** |
+| Q3 | **窗口尺寸与构图**：建议 260×300 逻辑像素、猫占满宽度、底部留 8px 甩尾余量。（真实世界样本 `CoPet` 用的是 164×189，可作对照） | 建议照此；可缩放档位留到后续 7-1 卡。**【终案：尺寸采用；SVG 设计坐标系 320×360、`VIEW_BOX = '0 0 320 360'`（`DESIGN.md` §3.5）】** |
+| Q4 | **瞳孔跟随的采样范围与频率**：全局跟随还是只在靠近窗口时跟？30Hz 还是 60Hz？ | 建议**全局跟随 + 30Hz**；鼠标离窗口过远时瞳孔回正。**【终案 2026-10-06：全局跟随 + **60Hz**——`SAMPLE_HZ = 60`（`DESIGN.md` §3.5），离窗口中心 > `FAR_RESET_PX` 1500 时瞳孔回正。**30Hz 的建议作废**，依据用户 Q4 裁决】** |
 | Q5 | **壳与退出**：右键菜单只放「退出」，还是加置顶开关/缩放？要不要系统托盘图标？ | 建议**只放「退出」+ 不要托盘**——托盘会引入「关窗不退出」的生命周期复杂度 |
 | Q6 | **2-6 判定三值**：本轮落「**自研**」（④ 不过：依赖与联网约束冲突 + 载体模型不匹配） | 建议采纳；若你认为应改为「抄思路自研」的正式记录，我可把「外部方案」节的「抄思路」一段升为正式判定 |

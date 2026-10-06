@@ -70,7 +70,20 @@ foreach ($f in @($rel | Where-Object { $txtExt -contains [IO.Path]::GetExtension
 $srcBlob = ''; foreach ($f in $src) { $srcBlob += $txt[$f] + "`n" }
 $allTxt = $blob.ToString() + "`n" + $docTxt
 $ghost = @{}
-foreach ($m in [regex]::Matches($docTxt, '[^/]`([A-Za-z0-9_\-./\\]+\.[a-z][a-z0-9]{0,7})`')) { $p = $m.Groups[1].Value.Replace('\','/') -replace '^\./',''; if ($p -notmatch '^(\.env|node_modules|dist|build|\.git)(/|$)' -and -not (Test-Path -LiteralPath (Join-Path $root ($p -replace '/', $sep)))) { $ghost[$p] = 1 } }
+$ghostByName = 0
+# ⚠️ 判据加固（TD-005，2026-10-06）：早期版本只在**仓库根**拼路径判存在性，于是文档里写的**裸文件名**
+#   （`main.rs` / `DESIGN.md` / `SCOPE.md` / `ARCHITECTURE.md` …）一律被判成「文档幽灵」——实测 71 项里
+#   绝大多数是这种误报，而 `docs/ARCHITECTURE.md:33` 恰恰写着「写全路径就不会被误判」，两处口径相反，
+#   导致 `docs/README.md:42` 的「每条必落删除/债/补登记」不可执行。现在补两条消歧：① 仓库根路径存在 → 不是幽灵；
+#   ② 该路径的 **basename** 在仓库文件清单里存在任一同名文件 → 不是幽灵（计入 $ghostByName，不静默吞）。
+foreach ($m in [regex]::Matches($docTxt, '[^/]`([A-Za-z0-9_\-./\\]+\.[a-z][a-z0-9]{0,7})`')) {
+    $p = $m.Groups[1].Value.Replace('\','/') -replace '^\./',''
+    if ($p -match '^(\.env|node_modules|dist|build|\.git)(/|$)') { continue }
+    if (Test-Path -LiteralPath (Join-Path $root ($p -replace '/', $sep))) { continue }
+    $bn = [IO.Path]::GetFileName($p)
+    if (@($fs | Where-Object { [IO.Path]::GetFileName(([string]$_)) -ieq $bn }).Count -gt 0) { $ghostByName++; continue }
+    $ghost[$p] = 1
+}
 $freq = @{}
 foreach ($m in [regex]::Matches($srcBlob, '[A-Za-z_$][A-Za-z0-9_$]*')) { $k = $m.Value; $freq[$k] = 1 + $freq[$k] }
 $rxExp = [regex]'(?m)^\s*(?:export\s+(?:default\s+)?(?:declare\s+)?(?:async\s+)?(?:function|class|const|let|var|interface|type|enum)|def|function|func\s+(?:\([^)]*\)\s*)?|pub\s+fn|public\s+(?:static\s+|sealed\s+|abstract\s+)*(?:class|interface|enum|void|[A-Z]\w*))\s+([A-Za-z_$][\w$-]*)'
@@ -122,6 +135,7 @@ foreach ($sub in @('decisions', 'lessons', 'reviews')) {
 foreach ($x in $orphan) { Write-Host "[孤儿] $x" }
 foreach ($x in $zero) { Write-Host "[零引用导出] $x" }
 foreach ($x in $ghost.Keys) { Write-Host "[文档幽灵] $x" }
+if ($ghostByName -gt 0) { Write-Host ("[i] 文档幽灵判据：按文件名消歧 {0} 项（文档里写的是裸文件名、仓库内确实存在同名文件，不计幽灵——TD-005）" -f $ghostByName) }
 foreach ($x in $rev) { Write-Host "[反向幽灵] $x" }
 foreach ($x in $unreg) { Write-Host "[未登记] $x" }
 foreach ($x in $undoc) { Write-Host "[未登记文档] $x" }

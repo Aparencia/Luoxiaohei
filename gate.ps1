@@ -1,21 +1,36 @@
 ﻿# gate.ps1 · 机械门禁（零 token 检查：能脚本断言的不进对话；4-1 卡每批提交前后、4-2 卡开工）
 # 判词：红 = exit 1（非 git 工作树 / 锚点无效 / 缺 -Anchor / 缺 -ScopeFiles / 越界 / 行数超限 / lockfile 变更 / 文档义务未履行）；
-#   黄 = 通过但有需注意项（重命名条目、变更清单为空），仍 exit 0；绿 = exit 0。
+#   黄 = 通过但有需注意项（重命名条目、变更清单为空、已声明的生成物），仍 exit 0；绿 = exit 0。
 # 用法（复制即用；缺参数或指错仓库时脚本会把这两行原样打回来）：
 #   powershell -NoProfile -File gate.ps1 -Anchor HEAD~1 -ScopeFiles "src/a.ts,src/b.ts" -RepoRoot .
 #   powershell -NoProfile -File gate.ps1 -Anchor 9f8e7d6 -ScopeFiles "src/" -RepoRoot .   （9f8e7d6 换成你本批的起点提交哈希）
 # 参数：-Anchor 本批起点锚点（git 提交）｜-ScopeFiles 本批允许改动的文件或目录（多个用**逗号**写在同一个引号里；目录项写 "src/" 或写到已存在的目录名）
 #   ｜-LineLimit/-TestLineLimit 行数硬阈值（测试文件豁免到后者）｜-RepoRoot git 工作树根，默认当前目录。
+#   ｜-BatchAnchor（**项目侧扩展 · TD-003**）本批口径锚点，默认 '' = 逐字旧行为。传了它：⑥ 行数 与 ⑦ lockfile
+#     只看 `$BatchAnchor..HEAD`（本批）；⑤ 越界 与 ⑧ 文档义务**永远**按 `-Anchor` 的**任务累计**口径判。
+#     为什么：4-1 卡原文是「$anchor 取 STATE 的任务起点锚点 + $scopeFiles 取 SCOPE 清单」，跑到第二批就会把
+#     前几批的改动算成"越界"、把 `Cargo.lock` 一并拖进行数与 lockfile 判据（实测 13 条假红）。
+#     ⚠️ 唯一的假绿口子 = 传错值：`-BatchAnchor` 必须取**上一批末提交**（4-1 卡动作 2 记下的 `$prevBatch`），
+#     不是 `HEAD~1`——写成 `HEAD~1` 会把本批的 lockfile 从 ⑥⑦ 放走。
+#   ｜-DeclaredGenerated（**项目侧扩展 · TD-001**）生成物清单（逗号串，默认 '' = 无任何豁免通道）。声明过的
+#     文件在 ⑥ 行数 与 ⑦ lockfile 上**降级为黄且仍打印数字**；未声明的照旧判红。声明**只对 ⑥⑦ 生效，
+#     绕不过 ⑤ 越界**——生成物必须仍然写在 `-ScopeFiles` 里，且仍须单独提交并说明。
+#     为什么：`src-tauri/Cargo.lock` 4897 行、`package-lock.json` 1188 行必然撞 ⑥；⑦ 对任何含 lockfile 的
+#     批次无条件判红。没有豁免通道时，人只有"绕过门禁"或"从 scope 里摘掉"两条假绿路。
 # 为什么 -Anchor 与 -ScopeFiles 必填：没有锚点划不出"本批"范围，没有 scope 判不了越界——旧版本遇到这两种情况会整段跳过检查（假绿）。
 param(
     [string]$Anchor = '',
     [string[]]$ScopeFiles = @(),
+    [string]$BatchAnchor = '',
+    [string[]]$DeclaredGenerated = @(),
     [int]$LineLimit = 500,
     [int]$TestLineLimit = 1000,
     [string]$RepoRoot = '.'
 )
 # -ScopeFiles 归一化：`powershell -NoProfile -File` 不支持数组传参——`-ScopeFiles "a","b"` 只落进一个元素（另一个被判越界），传数组变量直接绑定失败（Cannot process argument transformation）；规范形态 = 一个引号内的逗号串 `-ScopeFiles "src/a.ts,src/b.ts"`。进程内直接调用（`& .\gate.ps1 -ScopeFiles @('a','b')`）同样可用，这里对每个元素再切一次逗号；路径本身含逗号的项目请改把该文件所在目录写进 scope。
 $ScopeFiles = @(foreach ($__s in $ScopeFiles) { foreach ($__p in ([string]$__s).Split(',')) { if ($__p.Trim() -ne '') { $__p.Trim() } } })
+# -DeclaredGenerated 同一套归一化。默认空数组 = 逐字旧行为：没有任何生成物豁免通道。
+$declared = @(foreach ($__s in $DeclaredGenerated) { foreach ($__p in ([string]$__s).Split(',')) { if ($__p.Trim() -ne '') { $__p.Trim().Replace('\','/') -replace '^\./','' } } })
 chcp 65001 > $null; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $fail = @(); $warn = @(); $usage = 'powershell -NoProfile -File gate.ps1 -Anchor HEAD -ScopeFiles "src/a.ts,src/b.ts" -RepoRoot .'
 # 测试文件判定：一律带词边界——旧正则 (test|spec) 会把 contest/latest/spectrum/inspector 判成测试文件而豁免到 1000 行。
@@ -65,6 +80,28 @@ while ($i -lt $z.Count) {
 $changed = @($changed | Where-Object { $_ } | Select-Object -Unique)
 if ($changed.Count -eq 0) { $warn += "变更清单为空：锚点 $Anchor 之后没有任何改动（核对 -RepoRoot/-Anchor 是否指错批次）" }
 
+# ④b 本批清单（-BatchAnchor，项目侧扩展 · TD-003）：⑥ 行数 与 ⑦ lockfile 按**本批**判；
+#   ⑤ 越界 与 ⑧ 文档义务仍按**任务累计**（$changed）判。不传 -BatchAnchor = $batchChanged ≡ $changed（逐字旧行为）。
+$batchChanged = $changed
+if ($BatchAnchor -ne '') {
+    git -C $RepoRoot cat-file -e "$BatchAnchor^{commit}" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[RED] -BatchAnchor 无效：$BatchAnchor 在 $RepoRoot 里不是可解析的提交（锚点必须是本批的上一批末提交，不是 HEAD~1）。" -ForegroundColor Red
+        Write-Host "      正确调用（在项目根）：$usage"
+        exit 1
+    }
+    $bch = @(git -C $RepoRoot -c core.quotepath=false diff --name-only "$BatchAnchor..HEAD" 2>$null | Where-Object { $_ })
+    $j = 0
+    while ($j -lt $z.Count) {
+        $e2 = [string]$z[$j]; $j++
+        if ($e2.Length -lt 4) { continue }
+        if ($e2.Substring(0,2) -match '[RC]') { $j++ }   # 重命名条目：吃掉第二个字段（旧路径）
+        $bch += $e2.Substring(3)
+    }
+    $batchChanged = @($bch | Where-Object { $_ } | Select-Object -Unique)
+    $warn += "本批口径：-Anchor $Anchor 任务累计 $($changed.Count) 个文件 → -BatchAnchor $BatchAnchor 本批 $($batchChanged.Count) 个文件（⑥⑦ 只看本批，⑤⑧ 仍看任务累计）"
+}
+
 # ⑤ 范围合规：-ScopeFiles 支持精确文件与目录——以 / 结尾或指向已存在目录的项，其下所有文件都算在范围内（真实项目常用 "src/" 当 scope）。
 $sd = @(); $sf = @()
 foreach ($s in $ScopeFiles) {
@@ -81,21 +118,32 @@ foreach ($f in $changed) {
 
 # ⑥ 行数上限（默认 500 / 测试 1000）：硬阈值，超限 = 红（旧版只给黄字 = 假绿）。
 #   -LiteralPath + try/catch：中文或含通配符的路径不会再把异常吞成"检查通过"。
-foreach ($f in $changed) {
+#   口径 = $batchChanged（传了 -BatchAnchor 就是"本批"，否则 = 任务累计）。
+#   生成物（-DeclaredGenerated 声明过）超限 → 降级为黄，且**行数照旧打印**（豁免不是静默通行）。
+foreach ($f in $batchChanged) {
     $full = Join-Path $RepoRoot ($f -replace '/', [IO.Path]::DirectorySeparatorChar)
     $isFile = $false
     try { $isFile = Test-Path -LiteralPath $full -PathType Leaf } catch { $isFile = $false }
     if (-not $isFile) { continue }
+    $isGen = ($declared -contains $f)
     try { $n = [System.IO.File]::ReadAllLines($full, [Text.Encoding]::UTF8).Count }
     catch { $fail += "行数读取失败：$f（$($_.Exception.Message)）"; continue }
     $t = IsTest $f
     $lim = $LineLimit; if ($t) { $lim = $TestLineLimit }
-    if ($n -gt $lim) { $fail += "行数超限：$f 共 $n 行 > 上限 $lim（测试文件=$t）——拆分文件或缩范围" }
+    if ($n -gt $lim) {
+        if ($isGen) { $warn += "行数超限但已声明为生成物：$f 共 $n 行 > 上限 $lim（-DeclaredGenerated 放行；数字仍在此打印，人工核对它确实是生成物）" }
+        else { $fail += "行数超限：$f 共 $n 行 > 上限 $lim（测试文件=$t）——拆分文件或缩范围；若它是生成物，用 -DeclaredGenerated 显式声明并说明" }
+    }
 }
 
 # ⑦ lockfile 变更 = 未请求的依赖变更（AGENTS.md §2.3）：硬红灯，必须单独说明。
-$lk = @($changed | Where-Object { $_ -match '(?i)(lock|package-lock|yarn\.lock|poetry\.lock|uv\.lock|Cargo\.lock)' })
-if ($lk.Count -gt 0) { $fail += "依赖变更：$($lk -join '、')——lockfile 变更必须单独说明并独立提交" }
+#   口径同上 = $batchChanged。声明为生成物的（-DeclaredGenerated）降级为黄，**但仍要求单独提交 + 说明**——
+#   豁免的是"门禁判红"，不是"可以不说明"。注意判据里 `lock` 是一条裸备选，会命中任意路径含 lock 的文件。
+$lkRx = '(?i)(lock|package-lock|yarn\.lock|poetry\.lock|uv\.lock|Cargo\.lock)'
+$lk = @($batchChanged | Where-Object { $_ -match $lkRx -and $declared -notcontains $_ })
+$lkGen = @($batchChanged | Where-Object { $_ -match $lkRx -and $declared -contains $_ })
+if ($lk.Count -gt 0) { $fail += "依赖变更：$($lk -join '、')——lockfile 变更必须单独说明并独立提交；若它确实是生成物，用 -DeclaredGenerated 声明（声明后仍须单独提交与说明）" }
+if ($lkGen.Count -gt 0) { $warn += "依赖变更（已声明为生成物）：$($lkGen -join '、')——本批确实动了 lockfile，仍须单独提交并在提交信息里说明原因" }
 
 # ⑧ 文档义务（DOC_MAP.json）：命中形态而对应文档没在同批改动里 = 红。
 #   义务此前只写在散文里（AGENTS.md 的 D13 回写义务表 + docs/README.md 的对应表），索引键是
@@ -141,5 +189,5 @@ if ($warn.Count -gt 0) {
     Write-Host "[YELLOW] 机械检查通过，但有需注意项：" -ForegroundColor Yellow
     foreach ($x in $warn) { Write-Host "  - $x" }
 }
-Write-Host ("[GREEN] 机械门禁通过：变更 {0} 个文件｜锚点 {1}｜范围 {2} 项" -f $changed.Count, $Anchor, $ScopeFiles.Count) -ForegroundColor Green
+Write-Host ("[GREEN] 机械门禁通过：变更 {0} 个文件｜锚点 {1}｜范围 {2} 项｜行数/lockfile 口径 {3}" -f $changed.Count, $Anchor, $ScopeFiles.Count, $(if ($BatchAnchor -eq '') { "任务累计($($changed.Count))" } else { "本批 $BatchAnchor($($batchChanged.Count))" })) -ForegroundColor Green
 exit 0
