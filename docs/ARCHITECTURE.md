@@ -47,7 +47,7 @@ graph TD
 | 新界面代码（组件 / 样式 / 角色渲染） | `src/`（角色与动画建议独立子目录，由 2-1/3-1 卡定名） |
 | 新窗口控制命令（Rust） | `src-tauri/src/`（命令注册进 `src-tauri/src/lib.rs`） |
 | 新静态素材 | `public/` |
-| 新脚本 / 工具 | `scripts/`（尚未建立，需要时建立并在此登记） |
+| 新脚本 / 工具 | `scripts/`（**2026-10-06 已建立**；2-4 卡登记第 1 个：`scripts/nfr.ps1` = 六维非功能阈值的检查命令，`-Check <perf\|capacity\|availability\|security\|maintainability\|compat\|all>`；新脚本一律先在此登记再落盘） |
 | 窗口 / 打包配置 | `src-tauri/tauri.conf.json` |
 | 环境变量 | `.env`（真实值）/ `.env.example`（键名）——本项目当前无需任何环境变量 |
 
@@ -63,6 +63,18 @@ graph TD
 
 - 回写时机：`NFR.md` 定了阈值，同批把受影响的约束写进本文件 §1~§4，并核对 `.tool-versions` 的版本能否满足（例：要求 Node 22 而锁的是 18 → 先改锁定文件再写代码）。
 - 不适用时怎么写：某一类确实没有（如纯本地脚本无可用性要求）→ 在 `NFR.md` / `THREAT.md` 对应行写 `N/A（理由）`，理由要能判定，不许留空行。
+
+**2-4 卡定下的模块约束（阈值里"约束了模块怎么做"的行，逐条回写在此；改阈值必须同批改这里）：**
+
+| 约束 | 来自哪一维/哪条阈值 | 落到哪个模块 |
+| :-- | :-- | :-- |
+| 角色动画只能走**合成层**（`transform` / `opacity`），禁止动画属性触发 layout（`width`/`top`/`left` 之类） | 性能 `perf` 空闲 CPU ≤1%（单核） | 界面层 `src/character/heicat.css` |
+| 瞳孔跟随**只允许一个定时器**（60Hz），且仅在数值变化时写 DOM/属性；禁止 `requestAnimationFrame` 全帧重绘 | 性能 `perf` 空闲 CPU ≤1% + 兼容 `compat` | 界面层 `src/interaction/useCursorFollow.ts` |
+| 外壳层**不得引入任何网络相关插件/依赖**（`reqwest`、`tauri-plugin-http` 等）；`capabilities/default.json` 授权条目 ≤5 条 | 安全 `security` 零外联 + 最小权限 | 外壳层 `src-tauri/` |
+| capability 里**不得保留未被调用的授权**；删授权必须同批删对应的插件注册与 npm 包 | 安全 `security` 最小权限 | `src-tauri/capabilities/default.json`、`src-tauri/src/lib.rs`、`src-tauri/Cargo.toml` |
+| 不得使用 WebView2 在 Windows 10 1809 上不支持的特性（本机是 154，但目标下限是 1809 随附版本） | 兼容 `compat` Windows build ≥17763 | 界面层 `src/` |
+| 单文件 ≤500 行（测试文件 ≤1000 行）→ 角色、动画样式、交互 hook 必须分文件，禁止堆进 `src/App.tsx` | 可维护 `maintainability` | 界面层 `src/` |
+| 应用**不写任何用户目录文件**（不建日志、不建缓存）；若启用 SCOPE S1「位置记忆」，只允许 `localStorage` 一个坐标 | 容量 `capacity` + 安全 `security` | 界面层 `src/interaction/useDragExit.ts` |
 
 ## 6. 边界三问（3-7 卡动作 1；项目首次成型或结构变更时填）
 

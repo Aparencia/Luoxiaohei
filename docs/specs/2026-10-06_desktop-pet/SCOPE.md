@@ -40,7 +40,7 @@
 | # | 条目 | 判定问句回答 | 依赖 |
 | :-- | :-- | :-- | :-- |
 | **M1** | **透明置顶小窗配置**：`tauri.conf.json` 窗口改 260×300、`transparent:true`、`decorations:false`、`alwaysOnTop:true`、`skipTaskbar:true`、**`shadow:false`** | 不做这个，它就是个普通窗口，不是"桌面摆件" | 无 —— **前沿** |
-| **M2** | **ACL 权限补齐**：`capabilities/default.json` 补 `core:window:allow-close`、`core:window:allow-start-dragging`、`core:window:allow-set-ignore-cursor-events`、`core:menu:default` | 不补则 M6/M7 的命令**在运行时被 ACL 静默拒绝**（代码写对了也不动） | 无 —— **前沿** |
+| **M2** | **ACL 权限补齐 + 脚手架残留清除**：`capabilities/default.json` 补 `core:window:allow-close`、`core:window:allow-start-dragging`、`core:window:allow-set-ignore-cursor-events`、`core:menu:default`；**同批删除未被使用的 `opener:default` 与 `tauri-plugin-opener`**（2-4 卡实测：前端零引用，`git grep -n opener` 5 处全是脚手架注册点，`src/App.tsx` 不 import 它） | 不补则 M6/M7 的命令**在运行时被 ACL 静默拒绝**（代码写对了也不动）；不清残留则最小权限无从成立（D11 孤儿必须落删除/债/登记之一） | 无 —— **前沿** |
 | **M3** | **SVG 罗小黑静态造型**：通体漆黑、圆头圆脑、眼白占全脸约 2/3、黑瞳、长尾（见 §8 形象基准） | 不做这个，就没有"罗小黑"，只剩一只通用黑猫 | M1 |
 | **M4** | **三组 idle 动画**：呼吸（躯干 `scaleY` 往复）/ 眨眼（眼睑 80ms 开合）/ 甩尾（尾根 `rotate` 往复），三者同时进行且周期互不同步 | 不做这个，它是张贴纸 | M3 |
 | **M5** | **瞳孔跟随鼠标**：全局跟随、**60Hz** 采样；鼠标离窗口过远时瞳孔回正 | IDEA 卡动作 4「MVP 最薄切片」明列 | M3 |
