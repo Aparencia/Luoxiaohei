@@ -182,6 +182,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File gate.ps1 -Anchor HEAD~1 -Sco
 | 2 | 先 `(globalThis as unknown as { window: unknown }).window = globalThis` 再 `mockIPC` | ✔ `invoke('plugin:window\|cursor_position')` 返回 mock 值，回调收到的 cmd 逐字正确 | **KP-10~KP-12 成立**；这行垫片**是接缝约定的一部分**，每个用 `mockIPC` 的测试文件顶部都要写，不许各自发明写法 |
 | 3 | 不 mock 直接 `invoke(...)` | ✔ 抛错（Promise reject） | **KP-13 / KP-14 的失败分支可测**：`E-IPC-01` 用"mock 回调里 throw"构造，`E-IPC-02` 用"mock 返回 `null`"构造 |
 | 4 | `t.mock.timers.enable({ apis: ['setInterval'] })` + `tick(16)` | ✔ 回调恰好触发 1 次 | **KP-12 的"跑一个 tick"可受控驱动**——不需要 sleep，也不需要新依赖（Node 24 内置） |
+| 5 | 原生菜单要点击它（`Menu.new({items:[{action}]})`） | ✔ **`action` 走 `Channel`**：`menu/base.js` 的 `injectChannel()` 把 `action` 换成 `handler`（`new Channel()`，`handler.id` 就是 `mockIPC` 的 `registerCallback` 号），Rust 侧点击即 `runCallback(id, {index, message})`。`mockIPC` 已经把 `transformCallback` / `runCallback` 装进 `window.__TAURI_INTERNALS__`，所以 **`runCallback(handler.id, {index:0, message:id})` 就是"点了那一条"** | **SCOPE M7 的"点「退出」→ `plugin:window\|close`"可以在 Node 里端到端断言**（KP-12 之外的 M7·②）；也顺带钉死"菜单只有一项"（数 `plugin:menu\|new` 的 payload） |
+| 6 | `mockIPC` 让 `plugin:window\|cursor_position` 回 `null`（构造 E-IPC-02） | ✖ **不是 resolve(null)**：`window.js` 的 `cursorPosition()` 是 `invoke(...).then(v => new PhysicalPosition(v))`，`dpi.js` 里 `'Physical' in null` 抛 `TypeError` | **4-1 批次 4 的第一版实现当场红**（KP-13），修法 = 同时挡 `null` 与 `TypeError`（`readCursorScreen()`），判据用 `instanceof TypeError` 而不是比字符串——ACL 拒绝抛的是字符串，两者必须分得开（否则 KP-14 空转）。契约勘误已同批写进 `DESIGN.md` §3.3 |
 
 **两种反模式（收工前逐条自查）**
 1. **同义反复测试**：断言重抄实现。判据一句话：这条测试说得出"改哪一行生产代码会让它变红"吗？**本卡已点出两处高危**——`SAMPLE_HZ === 60`（NFR P3 的验收命令原文就是断言这个常量）与 `window-config OK 6/6` 里的常量比对。二者的处理：常量断言**保留**（它们是 SCOPE/NFR 逐字指定的命令判据），但**必须**各配一条行为断言——KP-12（单 tick 单次采样 + 未翻转不 invoke）与 KP-03（每条授权都能找到调用方）。只留常量断言的用例 = 不合格。
@@ -197,8 +199,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File gate.ps1 -Anchor HEAD~1 -Sco
 | MUT-4 | `heicat.css` 把 `transform` 改成 `width` | `motion.test.ts` 的合成层断言（KP-06） |
 | MUT-5 | `tauri.conf.json` 的 `transparent` → `false` | `tauriConfig.test.ts` 的 `window-config` 用例 |
 | MUT-6 | `capabilities/default.json` 删掉 `core:menu:default` | `tauriConfig.test.ts` 的 `acl` 用例 |
-| MUT-7 | `hitTest.ts` 的 `scaleFactor` 除法改成乘法 | `hitTest.test.ts` 的四组缩放用例（KP-09） |
-| MUT-8 | `usePointerPassthrough.ts` 改成**每个 tick 都** invoke | `dragExit.test.ts` 的 KP-12"未翻转不 invoke"用例 |
+| MUT-7 | `hitTest.ts` 的 `scaleFactor` 除法改成乘法 | `hitTest.test.ts` 的四组缩放用例（KP-09）——4-1 批次 4 实测：M6·②③④⑤ 红；**M6·① 恒存活**（`scaleFactor = 1.0` 下 ÷1 ≡ ×1，这是用例选择的必然，不是漏网）|
+| MUT-8 | `usePointerPassthrough.ts` 改成**每个 tick 都** invoke | `dragExit.test.ts` 的 KP-12"未翻转不 invoke"用例——4-1 批次 4 实测：KP-12·② 与 KP-14 同时红（后者的"失败后不重试"也被同一条改动打破）|
 
 > 重构**不属于这个循环**：测试-实现-重构里的"重构"是同一批内就地小步收拾，不是另开一批。要成规模重构 → 另立任务走 7-8。
 

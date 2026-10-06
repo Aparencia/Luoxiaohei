@@ -19,7 +19,7 @@
 // 换成 `var()` 那条判据就变空；因此 `heicat.css` 里刻意**不定义**眼白变量，同一个事实仍然只写一处。
 // ⚠️ 本文件（含注释）不许再出现那个白色字面量：判据是 `match(/fill="#…"/g)` 数次数，
 // 注释里写一遍就会被自己判红——4-1 批次 2 实测（同一类坑见风险摘要 ㊶）。
-import type { CSSProperties } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { CAT_GEOMETRY, VIEW_BOX, pupilOffsetFor } from "./geometry.ts";
 import "./heicat.css";
 
@@ -28,9 +28,19 @@ type HeiCatProps = {
   gazeDeg?: number;
   /** 归一化幅度（0 ~ 1）：0 = 回正、1 = 满偏。缺省 = 静态姿态 */
   gazeTravel?: number;
+  /** M7：左键按住猫身拖窗口。挂在根 `<svg>` 上——`.hei-cat` 是 `pointer-events:none`、形状才是
+   *  `visiblePainted`，所以事件只从**画出来的形状**冒泡上来（SCOPE §7 的"仅绘制形状可命中"）。 */
+  onMouseDown?: (event: ReactMouseEvent<SVGSVGElement>) => void;
+  /** M7：右键弹原生菜单「退出」。同样只在猫身上触发；透明区交给 M6 的穿透。 */
+  onContextMenu?: (event: ReactMouseEvent<SVGSVGElement>) => void;
 };
 
-export default function HeiCat({ gazeDeg = 0, gazeTravel = 0 }: HeiCatProps) {
+export default function HeiCat({
+  gazeDeg = 0,
+  gazeTravel = 0,
+  onMouseDown,
+  onContextMenu,
+}: HeiCatProps) {
   const g = CAT_GEOMETRY;
   const [leftEye, rightEye] = g.eyeWhites;
   const [leftPupil, rightPupil] = g.pupils;
@@ -43,7 +53,13 @@ export default function HeiCat({ gazeDeg = 0, gazeTravel = 0 }: HeiCatProps) {
   } as CSSProperties;
 
   return (
-    <svg className="hei-cat" viewBox={VIEW_BOX} style={gazeVars}>
+    <svg
+      className="hei-cat"
+      viewBox={VIEW_BOX}
+      style={gazeVars}
+      onMouseDown={onMouseDown}
+      onContextMenu={onContextMenu}
+    >
       <defs>
         {/* 头部渐变：500 档（上）→ 700 档（下），给圆头一点体积感（DESIGN_TOKENS §1） */}
         <linearGradient id="hei-head-grad" x1="0" y1="0" x2="0" y2="1">

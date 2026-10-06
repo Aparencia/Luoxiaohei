@@ -140,7 +140,7 @@ I7  req(menu|new) {"kind":"Menu","options":{"items":[…]},"handler":<Channel>} 
 | 错误码 | 触发条件 | 现象 | 处置（代码写法定死） | 谁在门禁里拦住它 |
 | :-- | :-- | :-- | :-- | :-- |
 | **E-IPC-01** | capability 缺条目，ACL 拒绝该命令 | `invoke` 返回 rejected Promise | **不吞错**：`console.error('[ipc] E-IPC-01 <命令名>', err)`；功能静默失效由门禁拦，不靠运行时兜 | `src/tauriConfig.test.ts` 的 `acl OK 4/4` 用例（M2 验收命令）断言 5 条权限齐全 |
-| **E-IPC-02** | `cursorPosition()` / `currentMonitor()` 返回 `null`（鼠标移出所有屏幕、显示器拔插、远程桌面切分辨率） | Promise **resolved 为** `null`，不抛错 | 瞳孔回正 0°；穿透开关**保持上一次取值**（不许翻成整窗穿透）；不重试、不记盘 | `src/interaction/gaze.test.ts` 与 `hitTest.test.ts` 各含一条 `null` 入参用例，断言不抛错且输出确定值 |
+| **E-IPC-02** | `cursorPosition()` / `currentMonitor()` 返回 `null`（鼠标移出所有屏幕、显示器拔插、远程桌面切分辨率） | Promise **resolved 为** `null`，不抛错。⚠️ **4-1 批次 4 实测勘误**：`@tauri-apps/api` v2.12.1 的 `cursorPosition()` 是 `invoke(...).then(v => new PhysicalPosition(v))`，Rust 侧回 `null` 时它在 `dpi.js` 抛 `TypeError: Cannot use 'in' operator to search for 'Physical' in null` ⇒ "取不到坐标"的**现实形态是 rejection**。契约不变（回正 + 保持上一次取值），实现同时挡两种形态（`readCursorScreen()`）；判据用 `instanceof TypeError` 而不是比字符串，因为 ACL 拒绝抛的是字符串（→ E-IPC-01） | 瞳孔回正 0°；穿透开关**保持上一次取值**（不许翻成整窗穿透）；不重试、不记盘 | `src/interaction/dragExit.test.ts` 的 KP-13（走真封装，构造的正是 `null` → `TypeError` 这条路），断言不抛错且输出确定值 |
 | **E-IPC-03** | 窗口生命周期末端的调用（`close()` 之后仍有 tick 在排队） | rejected Promise | 忽略（`close()` 是最后一动作，进程随即退出） | 无（不可达路径，4-2 审查只核对"`close()` 后不再写状态"这一点） |
 
 > 本项目**不使用** 9xxx 占位错误码通道（那是"本期不实现但契约先行的 HTTP 占位接口"专用）；无 HTTP → 无 503 语义。

@@ -26,9 +26,10 @@
 ```powershell
 $anchor = (Select-String -Path STATE.md -Pattern '起点锚点\s*[:：]\s*([0-9a-fA-F]{7,40})').Matches[0].Groups[1].Value
 $prevBatch = (git rev-parse HEAD).Trim()          # 本批开工第一件事记下（4-1 卡动作 2 的 $prevBatch）
-$scope = 'package.json,package-lock.json,src-tauri/,src/,check.ps1,docs/,STATE.md,CHANGELOG.md,public/'
+$scope = 'package.json,package-lock.json,src-tauri/,src/,check.ps1,gate.ps1,orphans.ps1,security.ps1,scripts/,docs/,STATE.md,CHANGELOG.md,public/'
 powershell -NoProfile -ExecutionPolicy Bypass -File gate.ps1 -Anchor $anchor -BatchAnchor $prevBatch -ScopeFiles $scope -DeclaredGenerated "package-lock.json,src-tauri/Cargo.lock" -RepoRoot .
 ```
+- **`$scope` 里为什么有 `gate.ps1` / `orphans.ps1` / `security.ps1` / `scripts/`**：⑤ 越界判的是 `-Anchor..HEAD`，而这三个守护脚本与本目录在本任务内**确实被改过并已提交**（`3ce6494` 7-3 P2 加 `-BatchAnchor` / 修文档幽灵误判、`5663157` 写死口径、`ca499f5` 2-4 建 `scripts/nfr.ps1`）。**4-1 批次 4 实测**：漏掉它们 → `[RED] exit 1`，三条「越界」全是这几份**本任务自己的**产物（假红）。任务累计口径下，"本任务改过的文件"就该在清单里；真越界靠 `-BatchAnchor` 收窄 ⑥⑦，不靠删清单。
 - **`-ScopeFiles` 是任务累计口径，不是"本批"**：⑤ 越界判的是 `-Anchor..HEAD` ∪ 未提交的全部改动（4-1 卡原文 = "换成 SCOPE 文件清单"）。**本仓实测的教训**：批次 1a 时把它写成"本批这 4 个文件" → 门禁一次报 **13 条假越界**（全是批次 0 已提交的文件）。要收窄的只有 ⑥⑦，那是 `-BatchAnchor` 的职责。
 - **为什么不是 4-1 卡原文那条命令**：卡原文是「任务起点锚点 + SCOPE 清单」，写到第二批就会把前几批的改动算成"越界"，并把 `Cargo.lock` 一并拖进行数与 lockfile 判据 → 实测多条假红。现在 ⑤ 越界／⑧ 文档义务仍按**任务累计**（正是卡想要的"防范围蔓延"），只把 ⑥ 行数／⑦ lockfile 收到**本批**。
 - **`-DeclaredGenerated` 的两个固定值**：`package-lock.json`（1188 行）与 `src-tauri/Cargo.lock`（4897 行）——两者都必然撞 ⑥ 的 500 行上限。声明 ≠ 免说明：**仍须单独提交 + 提交信息里写明原因**，且**仍必须在 `-ScopeFiles` 里**（豁免绕不过 ⑤）。

@@ -1,14 +1,15 @@
-// 产物寿命：持久（进仓库）｜ 卡：4-1 批次 3 ｜ M5 的副作用层：全项目唯一的 60Hz 定时器持有者
+// 产物寿命：持久（进仓库）｜ 卡：4-1 批次 3（批次 4 补 `windowOrigin` / `scaleFactor` / 导出 tick 体）｜ M5
 //
 // 为什么只有这个文件允许起定时器：ARCHITECTURE §5 第 2 行——「瞳孔跟随**只允许一个定时器**（60Hz）」。
-// 批次 4 的 `usePointerPassthrough` 会消费同一个 tick 的 `cursorScreen`，**自己不起表**：
+// 批次 4 的 `usePointerPassthrough` 会消费同一个 tick 的 `cursorScreen` + `windowOrigin`，**自己不起表**：
 // 两个 60Hz 定时器 = 120 次/秒 IPC，直接顶 NFR perf P1（空闲 CPU ≤1%）。gaze.test.ts 的 M5·⑨ 会数这件事。
 // 因此每个 tick **只发一次** `cursor_position`；窗口几何（位置 / 尺寸 / 缩放）走**事件驱动**缓存
 // （挂载 + move/resize），不逐帧查——多一条逐帧 IPC 就够把上面那条约束掏空。
 //
 // 失败分支（DESIGN §3.3 的两条错误码）：
-// - `cursor_position` 回 `null`（E-IPC-02：鼠标移出所有屏幕 / 显示器拔插）→ 瞳孔回正（角度与幅度都归 0），
-//   `cursorScreen` 交 `null` 给下游（穿透开关保持上一次取值是批次 4 的事）。
+// - `cursor_position` 取不到坐标（E-IPC-02：鼠标移出所有屏幕 / 显示器拔插）→ 瞳孔回正（角度与幅度都归 0），
+//   `cursorScreen` 交 `null` 给下游（穿透开关保持上一次取值是批次 4 的事）。**这条分支的现实形态是
+//   `TypeError` 而不是 `null`**，见 `readCursorScreen` 的注释（批次 4 实测的上游行为）。
 // - IPC 被 ACL 拒绝或桥不可用（E-IPC-01）→ 落一条能指到根因的 console 错误，跳过这个 tick；不吞错、不重试风暴。
 //
 // ceiling: 窗口几何是**缓存**的（挂载 + move/resize 事件）——系统拖动窗口的那几帧里，瞳孔用的还是上一次的中心
@@ -23,7 +24,12 @@ import type { Window } from "@tauri-apps/api/window";
 import type { Point } from "../character/geometry.ts";
 import { SAMPLE_HZ, gazeAngle, gazeTravel } from "./gaze.ts";
 
-/** 一个 tick 的三件事实。前两项是 D-a / D-b 之外的本批加法（`gazeTravel` 见 STATE 未决问题 11）。 */
+/**
+ * 一个 tick 的四件事实。`gazeTravel` 是批次 3 的加法（见 STATE 未决问题 11），
+ * `windowOrigin` 与 `scaleFactor` 是批次 4 的加法（见未决问题 12）：穿透层要拿它们把**同一个拍**的
+ * `cursorScreen` 换算成视口坐标——补这两个字段是为了让窗口几何仍然只有这一个读取者（`readGeometry`），
+ * 而不是让 `usePointerPassthrough` 自己再监听一次 move/resize 去读第二份。
+ */
 export type CursorFollow = {
   /** 瞳孔角度（度，−180 ~ 180）：0 = 回正。DESIGN §2 的 D-a */
   gazeDeg: number;
@@ -31,19 +37,38 @@ export type CursorFollow = {
   gazeTravel: number;
   /** 光标屏幕坐标（**物理 px**，`null` = 取不到）：批次 4 的 `usePointerPassthrough` 消费它 */
   cursorScreen: Point | null;
+  /** 窗口左上角（**物理 px**，`null` = 几何读不到）：`screenToViewport` 的原点 */
+  windowOrigin: Point | null;
+  /** 窗口所在显示器的缩放（读不到时 1）：`screenToViewport` 的除数 */
+  scaleFactor: number;
 };
 
-const NEUTRAL: CursorFollow = { gazeDeg: 0, gazeTravel: 0, cursorScreen: null };
+const NEUTRAL: CursorFollow = {
+  gazeDeg: 0,
+  gazeTravel: 0,
+  cursorScreen: null,
+  windowOrigin: null,
+  scaleFactor: 1,
+};
 
-/** 窗口几何缓存：屏幕中心（物理 px）+ 显示器缩放。两者必须同时换，否则 DPI 一变门限就整体偏移。 */
-type WindowGeometry = { center: Point; scaleFactor: number };
+/**
+ * 窗口几何缓存：左上角 + 屏幕中心（都是物理 px）+ 显示器缩放。
+ * 三者必须同时换，否则 DPI 一变门限就整体偏移（U1）；`center` 由 `origin` 推出，不许各算一份。
+ */
+export type WindowGeometry = { origin: Point; center: Point; scaleFactor: number };
 
-/** E-IPC-01：这条链路断了。写清"发生了什么 + 为什么 + 怎么办"（docs/UI.md §8 的错误模板）。 */
-const reportIpcFailure = (error: unknown): void => {
+/**
+ * E-IPC-01：这条链路断了。写清"发生了什么 + 那条命令 + 怎么办"（docs/UI.md §8 的错误模板）。
+ * 三个 interaction 模块共用这一处落点（D12 信息阶梯：错误码的格式只写一遍），`command` 由调用方
+ * 点名——`plugin:window|cursor_position` / `plugin:window|set_ignore_cursor_events` /
+ * `plugin:window|close` 断掉的样子完全不同，痕迹里没有命令名就没人知道该查哪条链。
+ */
+export const reportIpcFailure = (command: string, error: unknown): void => {
   console.error(
-    `[ipc] E-IPC-01 plugin:window 的读查询被拒绝或桥不可用：${String(error)}。` +
-      `瞳孔跟随停在回正 0°，不重试、不假装成功。排查：src-tauri/capabilities/default.json 必须含 core:default` +
-      `（其 core:window:default 提供 allow-cursor-position / allow-outer-position / allow-inner-size / allow-current-monitor）。`,
+    `[ipc] E-IPC-01 ${command} 被拒绝或桥不可用：${String(error)}。` +
+      `功能停在当前取值上，不重试、不假装成功。排查：src-tauri/capabilities/default.json 必须含 core:default` +
+      `（其 core:window:default 提供 allow-cursor-position / allow-outer-position / allow-inner-size / allow-current-monitor），` +
+      `写命令另需三条具名授权：allow-close / allow-start-dragging / allow-set-ignore-cursor-events，菜单需 core:menu:default。`,
   );
 };
 
@@ -52,7 +77,7 @@ const currentWindowOrNull = (): Window | null => {
   try {
     return getCurrentWindow();
   } catch (error) {
-    reportIpcFailure(error);
+    reportIpcFailure("plugin:window|getCurrentWindow", error);
     return null;
   }
 };
@@ -64,23 +89,55 @@ const readGeometry = async (win: Window): Promise<WindowGeometry> => {
     win.innerSize(),
     currentMonitor(),
   ]);
+  const origin = { x: position.x, y: position.y };
   return {
-    center: { x: position.x + size.width / 2, y: position.y + size.height / 2 },
+    origin,
+    center: { x: origin.x + size.width / 2, y: origin.y + size.height / 2 },
     // U1（多显示器 + 混合 DPI）：除数必须是正的有限值，否则角度会算出 NaN/Infinity
     scaleFactor: monitor && monitor.scaleFactor > 0 ? monitor.scaleFactor : 1,
   };
 };
 
-/** 采样一次 → 三件事实。`cursorScreen` 保持物理 px：DESIGN §3.5 的 `screenToViewport` 要吃它。 */
-const sample = async (geometry: WindowGeometry | null): Promise<CursorFollow> => {
-  const cursor: PhysicalPosition | null = await cursorPosition();
-  if (cursor === null) return NEUTRAL; // E-IPC-02：取不到坐标 → 回正（SCOPE U3）
-  const cursorScreen = { x: cursor.x, y: cursor.y };
-  if (geometry === null) return { ...NEUTRAL, cursorScreen }; // 几何未知：角度无从算，但坐标仍交给下游
-  // 角度与幅度按**逻辑 px** 算：方向本身与缩放无关，而 1500px 这个门限不该随 DPI 变形（U1）
-  const dx = (cursor.x - geometry.center.x) / geometry.scaleFactor;
-  const dy = (cursor.y - geometry.center.y) / geometry.scaleFactor;
-  return { gazeDeg: gazeAngle(dx, dy), gazeTravel: gazeTravel(dx, dy), cursorScreen };
+const GEOMETRY_COMMANDS = "plugin:window|outer_position/inner_size/current_monitor";
+
+/**
+ * 取一次光标坐标（物理 px）；`null` = 取不到（E-IPC-02）。
+ *
+ * ⚠️ 本机实测（4-1 批次 4，`@tauri-apps/api` v2.12.1）：DESIGN §3.3 写的"E-IPC-02 = Promise **resolved 为**
+ * null、不抛错"对**封装函数**不成立——`cursorPosition()` 的实现是
+ * `invoke('plugin:window|cursor_position').then(v => new PhysicalPosition(v))`，
+ * Rust 侧回 `null` 时它在 `dpi.js` 里抛
+ * `TypeError: Cannot use 'in' operator to search for 'Physical' in null`。
+ * 所以"取不到坐标"这条分支有**两种形态**，两种都归 E-IPC-02：
+ *   ① resolve 出 `null`（契约原文的形态；上游哪天修好了仍走这条）
+ *   ② 上面那个 `TypeError`（当前版本的现实）
+ * 判据用 `instanceof TypeError` 而不是比字符串：ACL 拒绝抛的是 Rust 给的**字符串**
+ * （E-IPC-01），两者必须分得开——把"权限被拒"当成"鼠标移出屏幕"会让 KP-14 空转。
+ */
+const readCursorScreen = async (): Promise<Point | null> => {
+  try {
+    const cursor: PhysicalPosition | null = await cursorPosition();
+    return cursor === null ? null : { x: cursor.x, y: cursor.y };
+  } catch (error) {
+    if (error instanceof TypeError) return null;
+    throw error;
+  }
+};
+
+/**
+ * 采样一次 → 四件事实。**一拍只读一次坐标**（KP-12 的判据本体：这里多写一次 `cursorPosition()`
+ * 就是 120 次/秒 IPC）。`cursorScreen` 保持物理 px：DESIGN §3.5 的 `screenToViewport` 要吃它。
+ * 导出是为了让 KP-12·① 能"跑一拍、数一次"——不需要渲染 React 就能验这条约束。
+ */
+export const sampleCursor = async (geometry: WindowGeometry | null): Promise<CursorFollow> => {
+  const carried = { windowOrigin: geometry?.origin ?? null, scaleFactor: geometry?.scaleFactor ?? 1 };
+  const cursorScreen = await readCursorScreen();
+  if (cursorScreen === null) return { ...NEUTRAL, ...carried }; // E-IPC-02：取不到坐标 → 回正（SCOPE U3）
+  if (geometry === null) return { ...NEUTRAL, ...carried, cursorScreen }; // 几何未知：角度无从算，坐标仍交给下游
+  // 角度与幅度按**逻辑 px** 算：方向本身与缩放无关，而 400/1500 这两个门限不该随 DPI 变形（U1）
+  const dx = (cursorScreen.x - geometry.center.x) / geometry.scaleFactor;
+  const dy = (cursorScreen.y - geometry.center.y) / geometry.scaleFactor;
+  return { ...carried, gazeDeg: gazeAngle(dx, dy), gazeTravel: gazeTravel(dx, dy), cursorScreen };
 };
 
 export function useCursorFollow(enabled: boolean): CursorFollow {
@@ -98,7 +155,7 @@ export function useCursorFollow(enabled: boolean): CursorFollow {
         .then((next) => {
           if (alive) geometry.current = next;
         })
-        .catch(reportIpcFailure);
+        .catch((error) => reportIpcFailure(GEOMETRY_COMMANDS, error));
     };
     refresh();
     const stops: UnlistenFn[] = [];
@@ -109,7 +166,8 @@ export function useCursorFollow(enabled: boolean): CursorFollow {
           if (alive) stops.push(stop);
           else stop();
         })
-        .catch(reportIpcFailure);
+        // 事件订阅走 core:event:default 的 allow-listen/allow-unlisten（core:default 已含）
+        .catch((error) => reportIpcFailure("plugin:event|listen（onMoved/onResized）", error));
     };
     listen(win.onMoved(refresh));
     listen(win.onResized(refresh));
@@ -123,19 +181,24 @@ export function useCursorFollow(enabled: boolean): CursorFollow {
   useEffect(() => {
     if (!enabled) return;
     const tick = (): void => {
-      void sample(geometry.current)
+      void sampleCursor(geometry.current)
         .then((next) => {
           const prev = latest.current;
+          // 窗口原点与缩放也算"值"：窗口被拖动时同一屏幕坐标会落到不同的视口点，
+          // 漏掉这两项 = 穿透判定拿旧原点算（拖动那几帧点错地方）
           const unchanged =
             next.gazeDeg === prev.gazeDeg &&
             next.gazeTravel === prev.gazeTravel &&
             next.cursorScreen?.x === prev.cursorScreen?.x &&
-            next.cursorScreen?.y === prev.cursorScreen?.y;
+            next.cursorScreen?.y === prev.cursorScreen?.y &&
+            next.windowOrigin?.x === prev.windowOrigin?.x &&
+            next.windowOrigin?.y === prev.windowOrigin?.y &&
+            next.scaleFactor === prev.scaleFactor;
           if (unchanged) return;
           latest.current = next;
           setState(next);
         })
-        .catch(reportIpcFailure);
+        .catch((error) => reportIpcFailure("plugin:window|cursor_position", error));
     };
     const timer = setInterval(tick, 1000 / SAMPLE_HZ);
     return () => clearInterval(timer);

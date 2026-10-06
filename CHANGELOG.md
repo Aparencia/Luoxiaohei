@@ -17,6 +17,9 @@
 - **猫活了**：三组 idle 动画落进 `src/character/heicat.css`——呼吸（躯干 `scaleY`，3.2s 一个往返，幅度 3%，缩放基准在腹部底端）、眨眼（眼睑 `scaleY`，4s 一次、单次 100ms、闭合 50ms）、甩尾（尾根 `rotate`，2.4s 一个往返，±8°）；三周期两两不同、最小公倍数 48.0s，所以看不出"整体缩放"的同步感。三条全部关在 `@media (prefers-reduced-motion: no-preference)` 里，系统打开"减少动效"时它们**连声明都不存在**（而不是"播得快一点"）
 - **瞳孔开始跟随鼠标**：新增 `src/interaction/gaze.ts`（纯函数：角度 + 幅度）与 `src/interaction/useCursorFollow.ts`（全项目**唯一**的 60Hz 定时器）。鼠标在窗口附近时瞳孔朝它偏，偏到"眼白短半径的 45%"为止（幅度随距离平滑起落，避免光标压在窗口正中时方向抖动变成可见跳变）——这条起落曲线是**必须**的：光标压在中心时方向最不稳定，幅度不清零就会看见瞳孔瞬间跳到另一侧，而"全程无抖动、无跳变"正是 M5 的判据；鼠标甩到屏幕远端（离窗口中心 >1500px）瞳孔回正。取不到坐标（鼠标移出所有屏幕 / 显示器拔插）时回正 0°，不会产出 `rotate(NaN)` 这种非法 SVG 值
 - 新增 `src/character/motion.test.ts`（6 个用例，SCOPE §5 M4 的验收命令载体）与 `src/interaction/gaze.test.ts`（9 个用例，SCOPE §5 M5 的验收命令载体）
+- **透明的地方，点下去就是点到桌面**：窗口矩形内、猫身之外的像素不再拦截鼠标——点桌面图标能选中、双击能打开；鼠标一旦移到猫身上就立刻收回穿透，猫照样能拖能右键。判定在**每一帧**用同一个光标坐标做（不额外起定时器、不额外查坐标：跟瞳孔共用同一拍），并且**只在"从透明区进猫身 / 从猫身出透明区"翻转的那一刻**才发一条命令——一次穿越一条，不是每秒 60 条。判定用的是猫身 8 个部件盒的并集（尾巴按弯曲方向切成 6 段，所以尾巴弯里那块透明区不会被整块吃掉）；取不到光标坐标或读不到显示器缩放时**保持上一次的取值**，不会突然变成整窗穿透或整窗不穿透
+- **左键按住猫身把猫拖走，右键弹「退出」**：左键按下即开始系统级拖拽（拖拽期间由系统接管，松手停住）；右键弹出**原生菜单，只有一项「退出」**，点它窗口关闭、进程退出。菜单只建一次复用（不是每次右键都在系统侧新建一个）；拖拽进行中再按左键不会重复触发；菜单项文案与 SCOPE §7 一致（≤6 字、动词 + 对象）
+- 新增 `src/interaction/hitTest.ts`（纯函数：屏幕坐标 → 视口坐标、点是否落在猫身上）与 `src/interaction/usePointerPassthrough.ts`（**零定时器**：只消费瞳孔跟随的同一拍）、`src/interaction/useDragExit.ts`（左键拖拽 + 右键菜单）；新增 `src/interaction/hitTest.test.ts`（6 个用例，SCOPE §5 M6 的验收命令载体）与 `src/interaction/dragExit.test.ts`（6 个用例，SCOPE §5 M7 的验收命令载体 + KP-12/13/14）；四条具名授权自此**逐条都找得到调用方**（`acl-callers OK 4/4`），再删任何一处调用都会当场判红
 
 - 项目初始化：Tauri 2 + React 19 + TypeScript 桌面应用骨架（选型见 `docs/decisions/STACK_2026-10-06_桌面摆件技术栈.md`）
 - Roadbook V6 流程骨架：`AGENTS.md` 宪法、`STATE.md` 状态源、`docs/` 文档地图、五个守护脚本
@@ -60,6 +63,12 @@
 - `docs/UI.md` §9 的 default 行补上落地事实：三组动画已落 `heicat.css`（数值即 3-6 卡冻结值），瞳孔跟随是 60Hz **状态更新**而**不是动画**（`reduce` 下不降级）
 - `src/character/HeiCat.tsx` 新增两个 props（`gazeDeg` / `gazeTravel`，缺省 0）：角度与幅度换算出的瞳孔位移写成 `--hei-pupil-dx/dy` 两个 CSS 自定义属性挂在 `<svg>` 根上，由 `.hei-pupil` 消费——60Hz 下改的是变量而不是几何属性；两处 `transform-origin`（呼吸=腹部底端、甩尾=尾根）也改为从 `geometry.ts` 取值内联，写进 CSS 就是在第二处复述坐标
 - 瞳孔的最大偏移比例落成 `geometry.ts` 的 `PUPIL_TRAVEL_RATIO = 0.45`（SCOPE §7 元素表原文："距中心最大偏移 = 眼白短半径的 45%"）
+- `src/App.tsx` 接上第三个 hook 对（透明区穿透 + 拖拽退出）：`cursorScreen` / `windowOrigin` / `scaleFactor` **同一次采样**喂给瞳孔与穿透两个消费者——穿透层因此不必自己再监听一次窗口移动，也不必自己再读一次坐标（多一个 60Hz 采样器就是 120 次/秒 IPC，直接顶 NFR P1）
+- `src/interaction/useCursorFollow.ts` 的返回由 3 项增至 5 项（补窗口原点与显示器缩放，给穿透层换算视口坐标），并把它导出面的三个名字说明白：`reportIpcFailure(command, error)`（三个交互模块共用的 `E-IPC-01` 落点，错误码格式只写一遍）、`sampleCursor(geometry)`（一拍的采样体，"一拍只读一次坐标"这条判据靠它可数）、`WindowGeometry`
+- `src/character/HeiCat.tsx` 新增两个事件 props（`onMouseDown` / `onContextMenu`，缺省 undefined）：挂在角色根 `<svg>` 上——`.hei-cat` 是 `pointer-events:none`、每个形状是 `visiblePainted`，所以事件只从**画出来的形状**冒泡上来，与 SCOPE §7 的"仅绘制形状可命中"逐字一致；透明区根本没有事件可冒泡
+- `docs/specs/2026-10-06_desktop-pet/DESIGN.md` §3.3 的 **E-IPC-02 勘误**：契约写"Promise resolved 为 `null`、不抛错"，而 `@tauri-apps/api` v2.12.1 的 `cursorPosition()` 是 `invoke(...).then(v => new PhysicalPosition(v))`，Rust 侧回 `null` 时它抛 `TypeError`（`'Physical' in null`）⇒ "取不到坐标"的**现实形态是 rejection**。契约不变（回正 + 保持上一次取值），实现同时挡两种形态；判据用 `instanceof TypeError` 而不是比字符串，因为 ACL 拒绝抛的是字符串（→ E-IPC-01），两者混起来失败分支的用例就空转了
+- `docs/specs/2026-10-06_desktop-pet/TESTPLAN.md` §7 的实测表补两行（第 5、6 行）：**原生菜单项的 `action` 走 `Channel`**（`injectChannel()` 把它换成 `handler`，Rust 侧点击 = `runCallback(id, {index, message})`，而 `mockIPC` 顺带把 `transformCallback` / `runCallback` 装进 `window.__TAURI_INTERNALS__`）⇒ "点「退出」→ 关窗"这条验收判据**在 Node 里可端到端断言**，不必靠人眼；以及上面那条 E-IPC-02 的形态差异
+- `docs/UI.md` §10 补落地事实：DOM 侧命中（形状 `visiblePainted` → 事件冒泡到根 `<svg>`）与 OS 侧穿透（`isOverCharacter()` 逐盒命中，8 个粗筛盒的并集）是两套判据、服务两件事——前者决定"事件给不给我们"，后者决定"事件给不给桌面"
 
 ### 废弃
 
@@ -68,5 +77,6 @@
 
 ### 修复
 
+- **失败分支的形态与契约不符，被用例当场抓住**：`E-IPC-02`（鼠标移出所有屏幕 / 显示器拔插）在设计契约里是"Promise resolve 出 `null`"，而 Tauri 的 JS 封装会把它变成 `TypeError`（见上"变更"节的勘误）。第一版实现只挡了 `null`，`KP-13` 立刻判红；修法是同时挡两种形态，并且**不把 ACL 拒绝（`E-IPC-01`）一起吞成"鼠标不在屏幕上"**——两者靠"抛的是字符串还是 `TypeError`"分开。这条差异只有真跑才看得见，光读契约会写错
 - `docs/TECH_DEBT.md` **TD-001 / TD-003 / TD-005 结清**（每条附文件路径与实测输出，非"已修"二字）：TD-001 = 生成物无豁免通道（照旧会让 4-1 批次 1 的门禁永远红）｜TD-003 = 锚点语义打架（照 4-1 卡原文跑出假红，最省事的反应是关掉判据）｜TD-005 = 三处口径漂移。同批新开 **TD-006**（文档幽灵判据的残余噪声：55 项里含"4-1 计划中尚未创建的文件"与"对母版/外部项目的引用"两类）与 **TD-007**（`gate.ps1` / `orphans.ps1` 本次在项目侧扩展后与母版分叉，是否同推母版须立项）
 - 清理 4 个**失效**的 `.gitkeep` 占位（`docs/archive` / `decisions` / `lessons` / `specs` 四目录都已非空，占位符已成孤儿）：为 4-1 腾出文件额度——原预算下"当前 − 基线 > 20"会在功能完全正确时判红（`89 + 14 + 1 = 104 > 101`），清理后为 `85 + 14 − 2 + 1 = 98 ≤ 101`，**4-1 因此不必压缩模块划分**。`docs/reviews` 与 `docs/versions` 仍空，其占位符保留
