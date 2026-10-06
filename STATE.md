@@ -39,7 +39,7 @@
 | `opener` 插件残留 | `tauri-plugin-opener`（`src-tauri/Cargo.toml:22` + `src-tauri/src/lib.rs:10` + `package.json:16` + `capabilities/default.json:8`） | 无（本期不需要打开外部链接） | SCOPE **M2** 落地时同批删除四处引用，并把 `capabilities` 条目上限从 ≤5 收紧到 ≤5（删 `opener:default` 后 = `core:default` + 4） | 4-1 第一批 | #2-4 |
 
 ## 最近完成（滚动保留 5 条）
-- 2026-10-06 2-4 非功能需求完成（**阈值未确认**）：产物 `docs/specs/2026-10-06_desktop-pet/NFR.md`（**152 行**）；六维 19 条阈值 + 2 条 `N/A（理由）`；检查命令载体 `scripts/nfr.ps1`（301 行，六维各一条命令，退出码 0/1/2 三态）；架构约束回写 `docs/ARCHITECTURE.md` §4/§5（105 → 117 行）
+- 2026-10-06 2-4 非功能需求完成（**阈值未确认**）：产物 `docs/specs/2026-10-06_desktop-pet/NFR.md`（**152 行**）；六维 **28 条阈值行**（P4 / C4 / A5 / S5 / M5 / K5，其中 **26 条实阈值 + 2 条 `N/A（理由）`**）；检查命令载体 `scripts/nfr.ps1`（301 行，六维各一条命令，退出码 0/1/2 三态）；架构约束回写 `docs/ARCHITECTURE.md` §4/§5（105 → 117 行）
 - 2026-10-06 2-2 需求范围完成（**SCOPE 未逐字确认**）：产物 `docs/specs/2026-10-06_desktop-pet/SCOPE.md`（**279 行**）；MoSCoW = Must 8 / Should 5 / Could 5 / Won't 14；`预估改动行数 1150`
 - 2026-10-06 用户裁决落定：**方案 A** + Q1 要穿透 / Q2 网络搜索 / Q3 尺寸采用 / Q4 **60Hz** / Q5 壳与退出采用 / Q6 2-6 判定**自研**
 - 2026-10-06 2-6 外部方案调研**补跑**完成：9 次检索、3 个候选五查、6 行拒绝台账，判定 **自研**
