@@ -66,15 +66,20 @@ export function createDragExit(ports: DragExitPorts): DragExitHandlers {
 /**
  * 真端口。菜单**只建一次并复用**：每次右键都 `Menu.new` 会在 Rust 侧留一个没人释放的 rid
  * （菜单是 Rust 侧对象，前端只持句柄——`menu.d.ts` 的模块注释原文）。
+ *
+ * ⚠️ 缓存的是 **Promise** 而不是结果（4-2 的 S-02）：写成 `menu ??= await Menu.new(...)` 时，
+ * `??=` 在 `await` **之后**才写回闭包变量——同一次 `Menu.new` 往返内到达的第二次右键会读到
+ * `null`，于是各建一个菜单、其中一个句柄永久丢失（M7·② 的"复用"断言只覆盖顺序右键，看不出来）。
+ * 失败时把缓存清掉：缓存一个**被拒**的 Promise 等于菜单永久坏掉、后续每次右键都走同一条死路。
  * 关窗即退出进程：`close()` 是 `core:window:allow-close`（批次 1 已落），关掉唯一窗口 = 进程结束。
  */
 export function tauriDragExitPorts(): DragExitPorts {
   const quit = (): Promise<void> => getCurrentWindow().close();
-  let menu: Menu | null = null;
+  let menuPromise: Promise<Menu> | null = null;
   return {
     startDragging: () => getCurrentWindow().startDragging(),
     showQuitMenu: async () => {
-      menu ??= await Menu.new({
+      menuPromise ??= Menu.new({
         items: [
           {
             id: QUIT_ITEM_ID,
@@ -84,7 +89,11 @@ export function tauriDragExitPorts(): DragExitPorts {
             },
           },
         ],
+      }).catch((error: unknown) => {
+        menuPromise = null;
+        throw error;
       });
+      const menu = await menuPromise;
       await menu.popup();
     },
     reportFailure: reportIpcFailure,

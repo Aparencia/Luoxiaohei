@@ -45,7 +45,7 @@
 | # | 阈值 | 来源 | 验证动作 | 检查命令 | 跑在哪阶段 |
 | :-- | :-- | :-- | :-- | :-- | :-- |
 | **A1** | 连续运行 **8 小时**后进程树工作集增长 **≤ 5 MB**（无泄漏） | ③ BongoCat ADR-0003 的 Verification 段（验收动作含 device lost / swapchain recovery） | 挂机 8 h，脚本每 5 s 采样工作集，读峰值减起始值 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/nfr.ps1 -Check availability -Hours 8` | 5-2 发布前（4-3 先跑 `-Minutes 30` 做快速回归） |
-| **A2** | 连续启停 **100 次零失败**（每次窗口都出现、都干净退出、无进程残留） | ③ BongoCat ADR-0003 逐字「**100 次真实窗口创建/销毁**」 | 脚本循环启动→确认窗口→退出，统计失败次数 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/nfr.ps1 -Check availability -Launches 100` | 4-3 验证 |
+| **A2** | 连续启停 **100 次零失败**（每次窗口都出现、都干净退出、无进程残留） | ③ BongoCat ADR-0003 逐字「**100 次真实窗口创建/销毁**」 | 脚本循环启动→确认窗口→退出，统计失败次数。**4-2 的 S-01 勘误 + 4-1 批次 5 修复**：`Check-LaunchCycle` 第一版只有定义、**没有调用点**，照本行的命令跑会执行长跑浸泡、打印「本维全部阈值通过」并 exit 0——A2 **从未被测量却拿到绿色**；现已接线（`-Launches` 给了才跑，与 `-Hours`/`-Minutes` 同一形态），跑起来会真的打印「N 次启动/退出循环的失败次数（成功 M 次）」 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/nfr.ps1 -Check availability -Launches 100` | 4-3 验证 |
 | **A3** | 透明 + 置顶在 **100 次**显示/隐藏切换后仍正确（透明区不变黑） | ③ 同 ADR；本项目已知风险 Tauri #15947（该 issue 的现象就是透明区偶发变黑） | 4-3 时人工按 100 次「最小化→还原」，逐次看透明区 | 人工判据（无脚本）：`docs/specs/2026-10-06_desktop-pet/VERIFY.md` 第 A3 条 | 4-3 验证 |
 | **A4** | 同时只允许 **1 个** 应用进程组（单实例） | SCOPE W11（多实例管理本期不做） | 连点两次 exe，看进程组数 | `powershell -NoProfile -Command "@(Get-Process -Name luoxiaohei -ErrorAction SilentlyContinue).Count"`（Expected：`1`） | 4-3 验证 |
 | **A5** | 月度可用性 `N/A（本地桌面单机应用，无服务端、无线上流量，不存在"停机"概念）` | — | — | `N/A` | — |

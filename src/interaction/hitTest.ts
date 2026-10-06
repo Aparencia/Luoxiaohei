@@ -23,20 +23,35 @@ export function screenToViewport(screen: Point, windowOrigin: Point, scaleFactor
 }
 
 /**
- * 视口点是否落在任一粗筛盒里（`characterBounds()` 的输出）。
- * 两条口径写死：
+ * 视口点是否落在猫身上（`characterBounds()` 的输出）。
+ * 三条口径写死：
  * - **非有限坐标一律 false**：坐标坏掉时宁可让点击穿到桌面，也不要把整窗吃住——后者会让用户既点不到
  *   桌面、又拖不动猫（两个功能一起坏）。上游还有 `screenToViewport` 的缩放守卫兜一层。
- * - **边界算命中**（闭区间）：粗筛盒本身已经向外取整过（`geometry.ts` 的 `box()`），再在边界上抠 1px
- *   没有意义，反而会让猫身与透明区的交界处随亚像素抖动。
+ * - **边界算命中**（闭区间 / 椭圆取 ≤1 / 三角形取同号含 0）：形状本身已按描边外扩过（`geometry.ts`
+ *   的 `RIM_HALF`），再在边界上抠 1px 没有意义，反而会让猫身与透明区的交界处随亚像素抖动。
+ * - **按形状判，不按外接矩形判**：头是椭圆、耳是三角形、躯干与尾段是矩形（4-2 的 R-01——
+ *   把椭圆和三角形退化成矩形会让 9.9% 的窗口面积变成"既点不到桌面也拖不动"的死区）。
  */
 export function isOverCharacter(viewport: Point, bounds: Bounds[]): boolean {
   if (!Number.isFinite(viewport.x) || !Number.isFinite(viewport.y)) return false;
-  return bounds.some(
-    (b) =>
-      viewport.x >= b.x &&
-      viewport.x <= b.x + b.width &&
-      viewport.y >= b.y &&
-      viewport.y <= b.y + b.height,
-  );
+  return bounds.some((b) => {
+    if (b.shape === "rect") {
+      return (
+        viewport.x >= b.x &&
+        viewport.x <= b.x + b.width &&
+        viewport.y >= b.y &&
+        viewport.y <= b.y + b.height
+      );
+    }
+    if (b.shape === "ellipse") {
+      const nx = (viewport.x - b.cx) / b.rx;
+      const ny = (viewport.y - b.cy) / b.ry;
+      return nx * nx + ny * ny <= 1;
+    }
+    // 三角形：对三条边各取一次叉积，三个叉积同号（含 0）= 在内部或边上
+    const side = (p: Point, q: Point): number =>
+      (viewport.x - q.x) * (p.y - q.y) - (p.x - q.x) * (viewport.y - q.y);
+    const cross = [side(b.a, b.b), side(b.b, b.c), side(b.c, b.a)];
+    return !(cross.some((c) => c < 0) && cross.some((c) => c > 0));
+  });
 }

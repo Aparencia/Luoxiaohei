@@ -166,7 +166,11 @@ src/character/geometry.ts        （纯数据 + 纯查询，无副作用）
                                eyelidTravelPx: number; tail: { rootX: number; rootY: number; lengthPx: number; pathD: string };
                                // tail.lengthPx = 声明的目标弧长（408，设计坐标）；pathD 是 4-1 画的曲线，采样出的弧长 ≥ 1.20 × 体高才过 M3（见 DESIGN_TOKENS §10）
                                torsoOriginY: number }
-  export function characterBounds(): Bounds[]        // 输出换算到 CSS px（设计坐标 ×0.8125），与 screenToViewport 同一坐标系；供 hitTest 粗筛；纯函数
+  export function characterBounds(): Bounds[]        // 输出换算到 CSS px（设计坐标 ×0.8125），与 screenToViewport 同一坐标系；供 hitTest 命中判定；纯函数
+  // ⚠️ **4-2 的 R-01 勘误（4-1 批次 5 落地）**：`Bounds` 从"轴对齐矩形"改成**形状联合**（rect / ellipse / triangle）——
+  //    头是椭圆、耳是三角形（两者本来就是精确几何体）、躯干与尾段仍是矩形，每个形状向外扩 `RIM_HALF`（描边的一半）。
+  //    照旧写法（"头含耳"一个外接矩形）实测死区 **7740 CSS px² = 窗口面积 9.9%**：那片像素什么都没画，
+  //    落在上面既点不到桌面也拖不动猫；改精确形状后死区 **0.00%**（判据 `M6·⑦` 兜住）
 
 src/interaction/gaze.ts          （纯函数）
   export const SAMPLE_HZ = 60                        // M5 验收命令断言这个常量
@@ -175,7 +179,7 @@ src/interaction/gaze.ts          （纯函数）
 
 src/interaction/hitTest.ts       （纯函数，输入全部显式传入，D14① 禁隐式全局）
   export function screenToViewport(screen: Point, windowOrigin: Point, scaleFactor: number): Point
-  export function isOverCharacter(viewport: Point, bounds: Bounds[]): boolean
+  export function isOverCharacter(viewport: Point, bounds: Bounds[]): boolean   // 按形状判定（rect 闭区间 / ellipse ≤1 / triangle 叉积同号），非有限坐标一律 false
 
 src/interaction/useCursorFollow.ts      （唯一定时器持有者）
   export function useCursorFollow(enabled: boolean): { gazeDeg: number; cursorScreen: Point | null }

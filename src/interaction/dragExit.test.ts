@@ -248,3 +248,69 @@ test("KP-14 调用被拒（ACL）→ 不吞错：留下 E-IPC-01 痕迹，进程
 
   console.log(`KP-14 console.error 命中 ${logged.mock.calls.length} 条；${IGNORE} 失败后未重试（累计 ${countOf(IGNORE)} 次）`);
 });
+
+test("M7·③ 同一次 menu|new 往返内的两次右键 → 只建 1 个菜单，两次都弹（S-02 的靶子）", async () => {
+  await installIpc();
+  const NEW = "plugin:menu|new";
+  const POPUP = "plugin:menu|popup";
+  const { createDragExit, tauriDragExitPorts } = await loadDragExit();
+  let release: () => void = noop;
+  reply = (cmd) =>
+    cmd === NEW ? new Promise((resolve) => (release = () => resolve([11, "quit-menu"]))) : undefined;
+  const exit = createDragExit(tauriDragExitPorts());
+
+  // 两次右键落在**同一次** Menu.new 往返内：第一版实现把 `menu ??= await Menu.new(...)` 写在 await 之后，
+  // 于是两次都读到 null、各建一个 Rust 侧菜单，其中一个句柄永久丢失（4-2 的 S-02）。
+  // 修法 = 缓存 **Promise** 而不是结果——第二次右键读到的是同一个在途 Promise。
+  exit.onContextMenu({ button: 2, preventDefault: noop });
+  exit.onContextMenu({ button: 2, preventDefault: noop });
+  assert.equal(countOf(NEW), 1, "同一次往返内的第二次右键必须复用那个在途的 Menu.new（不许各建一个）");
+  assert.equal(countOf(POPUP), 0, "菜单还没建好就 popup = 弹一个不存在的菜单");
+
+  release();
+  await waitFor(() => countOf(POPUP) === 2, "两次右键各弹一次（复用的只是建菜单那一步，弹出不能省）");
+  assert.equal(countOf(NEW), 1, "全程只建一个菜单");
+  exit.onContextMenu({ button: 2, preventDefault: noop });
+  await waitFor(() => countOf(POPUP) === 3, "第三次右键（缓存已就绪）照常弹出");
+  assert.equal(countOf(NEW), 1, "复用缓存：第三次也不许再建");
+  console.log(`M7·③ 连发两次右键 → ${NEW} ${countOf(NEW)} 次 / ${POPUP} ${countOf(POPUP)} 次（三次右键）`);
+});
+
+test("KP-15 E-IPC-01 去重：同一处连续失败只留一条痕迹，恢复后再失败才再打（docs/UI.md §2 S3）", async () => {
+  await installIpc();
+  const CURSOR = "plugin:window|cursor_position";
+  const IGNORE = "plugin:window|set_ignore_cursor_events";
+  const { createIpcFailureReporter } = await loadCursorFollow();
+  const lines: string[] = [];
+  const reporter = createIpcFailureReporter((line) => lines.push(line));
+
+  // UI.md §2 的 S3 行写死：同一处连续失败只打第一次（防 60 次/秒刷屏）、恢复后再失败才再打。
+  // 60Hz tick 逐拍调它 ⇒ 不去重就是每秒 60 行同一条，真实后续报错被冲掉（4-2 的 S-06）。
+  for (let i = 0; i < 60; i++) reporter.reportFailure(CURSOR, new Error("window.cursor_position not allowed"));
+  assert.equal(lines.length, 1, `60 拍同因失败留下 ${lines.length} 条：只许 1 条`);
+  assert.match(lines[0], /E-IPC-01/, "痕迹必须带错误码");
+  assert.ok(lines[0].includes(CURSOR), "痕迹必须带命令名，否则没人知道断在哪条链上");
+
+  reporter.noteSuccess(CURSOR); // 恢复一拍
+  reporter.reportFailure(CURSOR, new Error("window.cursor_position not allowed"));
+  assert.equal(lines.length, 2, "恢复之后再失败必须再打一次：否则第二段故障被第一段的静音永久盖住");
+
+  reporter.reportFailure(IGNORE, new Error("window.set_ignore_cursor_events not allowed"));
+  assert.equal(lines.length, 3, "去重按**命令**分：另一条链断掉不许被上一条的静音吃掉");
+
+  // 生产侧接线（Node 里渲染不了 React，只能核结构）：成功的那个 tick 必须报告恢复，
+  // 否则一次失败之后这条链路永久静音——去重的一半是"记得解除"。
+  // ⚠️ 断言的是**调用点**而不是标识符：只查 `noteIpcSuccess(` 会被它自己的那行导出
+  // （`export const noteIpcSuccess = defaultReporter.noteSuccess;`）满足——实测 MUT-18
+  // （把 tick 里的调用删掉）照样全绿。带上参数才是那个调用点。
+  const src = readFileSync(new URL("./useCursorFollow.ts", import.meta.url), "utf8");
+  assert.ok(
+    src.includes("noteIpcSuccess(CURSOR_POSITION)"),
+    "每一拍成功时必须调 noteIpcSuccess(CURSOR_POSITION)：只加去重不加解除 = 一次抖动之后再也不报",
+  );
+  assert.ok(
+    src.includes("noteIpcSuccess(GEOMETRY_COMMANDS)"),
+    "窗口几何读成功时也要解除静音（它和坐标是两条独立的链）",
+  );
+  console.log(`KP-15 60 拍同因失败 → ${1} 条；恢复后再失败 → ${2} 条；另一条链 → ${3} 条（共 ${lines.length} 条）`);
+});

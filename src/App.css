@@ -1,13 +1,13 @@
 /* 全局样式 · 窗口的底色与定位（4-1 批次 1 整份替换脚手架演示页样式）
  *
  * 为什么只有这几条（每条都对得上一条判据，不是"顺手写的通用 reset"）：
- * - `background: transparent` —— 窗口本身是 `transparent:true`（tauri.conf.json），但网页若铺底色，
+ * - `background: transparent` ， 窗口本身是 `transparent:true`（tauri.conf.json），但网页若铺底色，
  *   那份透明就白配了：整块客户区变成不透明的白/灰板，摆件就不是摆件了（SCOPE §5 M1 的观感前提）。
- *   注意本文件**不写** `html { background-color: #fff }` 之类的兜底——那会直接破 M1。
- * - `width/height: 100%` + `overflow: hidden` —— 窗口尺寸已被 `resizable:false` / `maximizable:false`
+ *   注意本文件**不写** `html { background-color: #fff }` 之类的兜底，那会直接破 M1。
+ * - `width/height: 100%` + `overflow: hidden` ， 窗口尺寸已被 `resizable:false` / `maximizable:false`
  *   锁死在 260×300（DESIGN §3.4）。页面一旦出现滚动条就占掉约 15px 宽，
  *   角色 SVG 的 260 CSS px 宽会失去对齐基准（DESIGN §3.5 的 `characterBounds()` 按这个宽度换算）。
- * - `margin/padding: 0` —— body 默认 8px 外边距会把 SVG 推出窗口边界，直接破 M3 的造型比例断言。
+ * - `margin/padding: 0` ， body 默认 8px 外边距会把 SVG 推出窗口边界，直接破 M3 的造型比例断言。
  * - 角色自身的颜色一律取自 `docs/DESIGN_TOKENS.md`，不在这里写死任何色值（信息阶梯：同一事实只写一处）。
  */
 html,

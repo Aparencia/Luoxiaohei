@@ -73,6 +73,12 @@ test("M5·⑥ 距窗口中心 > FAR_RESET_PX 时归 0（含 1500 边界的两侧
   assert.equal(gazeTravel(far.dx, far.dy), 0);
   assert.equal(gazeTravel(NEAR_FULL_PX, 0), 1, "满偏半径处幅度必须到 1——否则瞳孔永远走不到 SCOPE §7 的 45% 上限");
   assert.equal(gazeTravel(0, 0), 0, "光标压在窗口中心时幅度为 0：方向在那里最抖，幅度不清零就会看见跳变（SCOPE M5 禁）");
+
+  // ⚠️ 上面四条边界断言都是**用实现自己的常量**构造的（`FAR_RESET_PX / Math.SQRT2`）——
+  // 把 FAR_RESET_PX 改成约 1132~1697 之间任意值，它们**全绿**（4-2 的 R-03）。
+  // 所以 SCOPE §5 M5 逐字写死的 1500 必须另有一条常量断言 pin 住，写法与 M5·⑨ 钉 `SAMPLE_HZ === 60` 一致。
+  assert.equal(FAR_RESET_PX, 1500, "SCOPE §5 M5 原文写死「> 1500px 时归 0」：回正半径不许漂移");
+  assert.equal(NEAR_FULL_PX, 400, "满偏半径是设计加法（DESIGN §3.5 的取值，非 SCOPE 硬数字）：改它必须同批改文档");
 });
 
 test("M5·⑦ 全方向夹取：任意方向的输出都落在 −180°~180° 且有限（KP-08 前半）", () => {

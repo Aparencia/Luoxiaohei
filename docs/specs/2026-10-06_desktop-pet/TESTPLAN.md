@@ -21,19 +21,19 @@
 | 层 | 覆盖什么 | 比例 | 预计条数 | 跑一次多久 | 谁写 |
 | :-- | :-- | :-: | --: | :-- | :-- |
 | **单元** | 纯函数 + **仓库内真实文本**的解析断言：`gazeAngle` / `screenToViewport` / `isOverCharacter` / `CAT_GEOMETRY` 的比例 / `heicat.css` 的 keyframes / `tauri.conf.json` 六键 / `capabilities/default.json` 四条 | ~80% | **35** | < 4 s | 4-1 每批同写 |
-| **集成** | 跨进程边界：`@tauri-apps/api/mocks` 的 `mockIPC` 断言真实发出的 IPC 命令、**调用次数**与失败分支（`start_dragging` / `close` / `set_ignore_cursor_events` 的翻转语义） | ~14% | **6** | < 1 s | 4-1 批次 4 |
+| **集成** | 跨进程边界：`@tauri-apps/api/mocks` 的 `mockIPC` 断言真实发出的 IPC 命令、**调用次数**与失败分支（`start_dragging` / `close` / `set_ignore_cursor_events` 的翻转语义） | ~14% | **8** | < 1 s | 4-1 批次 4 / 批次 5 |
 | **端到端** | 跑 `npm run tauri dev` 后真走一遍的 **3 条**：① 出现猫且背景透明 / 无边框 / 置顶 ② 瞳孔跟随鼠标 + 点透明区选中桌面图标 ③ 拖拽 + 右键「退出」后进程消失 | ~6% | **3**（人工） | 分钟级 | 4-3（人眼看） |
 
-按文件分解（预计，4-1 批次 1 首跑后把"预计"改成实测值）：
+按文件分解（**4-1 批次 5 回填实测值**；此前写的是"预计"，4-2 的 S-11 指出它一直没回填）：
 
 | 文件 | 层 | 条数 | 对应判据 |
 | :-- | :-- | --: | :-- |
-| `src/tauriConfig.test.ts` | 单元 | 8 | 窗口 6 键（`window-config OK 6/6`）+ 授权上限 ≤5 与"无未调用授权"（`acl OK 4/4` 的补强） |
-| `src/character/geometry.test.ts` | 单元 | 6 | M3 四条比例 + 白色只出现在 2 处眼白 + 头身比 |
+| `src/tauriConfig.test.ts` | 单元 | 6 | 窗口 6 键（`window-config OK 6/6`）+ 窗口尺寸锁 2 键 + 授权上限 ≤5 与"无未调用授权"（`acl OK 4/4` 的补强） |
+| `src/character/geometry.test.ts` | 单元 | 7 | M3 六条比例/白色/头身比 + **M5·⑩ 瞳孔满偏 = 短半径 × 45%（R-02）** |
 | `src/character/motion.test.ts` | 单元 | 6 | M4 呼吸周期 / 眨眼时长 / 甩尾周期 / 摆幅 / 三组周期互不相同 / 只出现合成层属性 |
-| `src/interaction/gaze.test.ts` | 单元 | 9 | M5 六个角度 + 远距归零 + 夹取与无 NaN + `SAMPLE_HZ === 60` |
-| `src/interaction/hitTest.test.ts` | 单元 | 6 | M6 四组 `scaleFactor` + 猫身内外各 1 |
-| `src/interaction/dragExit.test.ts` | 集成 | 6 | M7 两条命令 + **同一 tick 只读一次坐标** + 未翻转不 invoke + `E-IPC-02` / `E-IPC-01` 两条失败分支 |
+| `src/interaction/gaze.test.ts` | 单元 | 9 | M5 六个角度 + 远距归零（**含 `FAR_RESET_PX === 1500` 的常量 pin，R-03**）+ 夹取与无 NaN + `SAMPLE_HZ === 60` |
+| `src/interaction/hitTest.test.ts` | 单元 | 7 | M6 四组 `scaleFactor` + 猫身内外各 1 + **M6·⑦ 形状覆盖与死区（R-01）** |
+| `src/interaction/dragExit.test.ts` | 集成 | 8 | M7 两条命令 + **M7·③ 同一次 `menu\|new` 往返内的两次右键（S-02）** + 同一 tick 只读一次坐标 + 未翻转不 invoke + `E-IPC-02` / `E-IPC-01` 两条失败分支 + **KP-15 失败痕迹去重（S-06）** |
 
 - 三层各自"比例"= **用例条数占比**，不是覆盖率（本项目无覆盖率工具，见 §3）。
 - 端到端为什么只有 3 条且不能自动化：见 §5「哪些不测」第 2 行。
@@ -99,7 +99,7 @@ NFR 的 26 条实阈值逐条不漏地在这三处落定，本卡不重复它们
 | 范围 | 门槛 | 怎么量 | 不达标怎么办 |
 | :-- | :-- | :-- | :-- |
 | **新增代码**（4-1 起新建的 14 个文件） | **关键路径 100% 有用例**（§2.1 的 KP-01~KP-16 逐条有落点）+ 每条判据做 **1 次变异体证伪**（改坏实现 → 对应用例必须变红） | `node --test "src/**/*.test.ts"` 全绿 + §7 的 MUT 表逐行有"改了哪一行 / 哪个用例红了 / 命令输出" | 补用例；确属脚手架（`src/main.tsx`、`src/vite-env.d.ts`、`src/tauriConfig.test.ts` 自身）→ 写进 §5 并在本行标注排除 |
-| **全仓** | **只升不降**：口径 = 同一条命令的 `# pass N` 汇总行，**基线 = 4-1 批次 1 首次跑通时回填的实测数字**（预计 8），此后每批收工报同一个数字 | `npm run test` 的汇总行，逐批记在 4-1 的批次知会里 | 降了先补回再进 4-3；确因删功能而减少 → 同批在 `CHANGELOG.md` 与本行写明原因 |
+| **全仓** | **只升不降**：口径 = 同一条命令的 `# pass N` 汇总行，**基线 = 4-1 批次 1 首次跑通时回填的实测数字（实测 6）**，此后每批收工报同一个数字（4-1 批次 5 = **43**） | `npm run test` 的汇总行，逐批记在 4-1 的批次知会里 | 降了先补回再进 4-3；确因删功能而减少 → 同批在 `CHANGELOG.md` 与本行写明原因 |
 
 > **本项目没有覆盖率工具**（W13 禁止 vitest/nyc/istanbul），故按卡内指定改用上表的量化替代：**"关键路径 100% 有用例 + 每个判据做一次变异体证伪"**。数字不是"覆盖率百分比"，不许在别处写成百分比。
 
@@ -147,7 +147,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File check.ps1
 npm run typecheck
   Expected：退出码 0，无 TS 报错
 npm run test
-  Expected：`# pass 41`（预计值，以 4-1 首跑回填的实测值为准）、`# fail 0`，退出码 0
+  Expected：`# pass 43`（**4-1 批次 5 实测**；基线 = 批次 1 首跑的 `6`，判据只升不降——4-2 的 S-11 已把"预计 41"回填成实测值）、`# fail 0`，退出码 0
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/nfr.ps1 -Check all
   Expected：退出码 0（某项不达标 = 1；环境缺失 = 2，**不算通过**）
 powershell -NoProfile -ExecutionPolicy Bypass -File doctor.ps1

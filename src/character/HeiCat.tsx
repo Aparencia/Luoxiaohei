@@ -1,12 +1,12 @@
 // 产物寿命：持久（进仓库）｜ 卡：4-1 批次 2（造型）+ 批次 3（M4 枢轴 + M5 瞳孔位移）｜ M3 + M4 + M5
 //
 // 这份 TSX 里为什么几乎没有数字：几何全部来自 `geometry.ts`（单一事实源），这里只决定**画的顺序**。
-// 绘制顺序（后画的盖住先画的 —— DESIGN_TOKENS §10 的"只留最外一圈"）：
+// 绘制顺序（后画的盖住先画的 ， DESIGN_TOKENS §10 的"只留最外一圈"）：
 //   尾巴 → 耳朵 → 身体（含两条腿）→ 头 → 眼白 → 瞳孔 → 眼睑
 // 尾根与耳根都刻意埋进身体/头里，露出来的只有该露的那一段（见 `geometry.ts` 的对应注释）。
 //
 // 两处 `transform-origin` 为什么写在这里而不是 CSS 里（批次 3）：它们的取值必须来自 `geometry.ts`
-// （呼吸的枢轴 = 腹部底端 `torsoOriginY`、甩尾的枢轴 = 尾根 `tail.rootX/rootY`）——
+// （呼吸的枢轴 = 腹部底端 `torsoOriginY`、甩尾的枢轴 = 尾根 `tail.rootX/rootY`），
 // 写进 CSS 就是在第二处复述坐标，改一处忘一处就是"尾巴绕着画布原点甩出去"这类事故。
 // 瞳孔位移同理：只把**变量**写到 `<svg>` 根上，CSS 侧 `.hei-pupil` 消费它（60Hz 下改的是变量、不是几何属性）。
 //
@@ -15,10 +15,10 @@
 //   `paint-order` 让每个形状自己的描边压在自己的填充之下，视觉结果同为"只留最外一圈"。
 //
 // 色值为什么几乎全在 `heicat.css` 的 `:root` 里：DESIGN_TOKENS §6 要求裸色值只出现在 `:root`。
-// 唯一的例外就是下面两只眼白——M3 的冻结断言按白色 fill 的**字面量**数元素（TESTPLAN KP-04），
+// 唯一的例外就是下面两只眼白，M3 的冻结断言按白色 fill 的**字面量**数元素（TESTPLAN KP-04），
 // 换成 `var()` 那条判据就变空；因此 `heicat.css` 里刻意**不定义**眼白变量，同一个事实仍然只写一处。
 // ⚠️ 本文件（含注释）不许再出现那个白色字面量：判据是 `match(/fill="#…"/g)` 数次数，
-// 注释里写一遍就会被自己判红——4-1 批次 2 实测（同一类坑见风险摘要 ㊶）。
+// 注释里写一遍就会被自己判红，4-1 批次 2 实测（同一类坑见风险摘要 ㊶）。
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { CAT_GEOMETRY, VIEW_BOX, pupilOffsetFor } from "./geometry.ts";
 import "./heicat.css";
@@ -28,7 +28,7 @@ type HeiCatProps = {
   gazeDeg?: number;
   /** 归一化幅度（0 ~ 1）：0 = 回正、1 = 满偏。缺省 = 静态姿态 */
   gazeTravel?: number;
-  /** M7：左键按住猫身拖窗口。挂在根 `<svg>` 上——`.hei-cat` 是 `pointer-events:none`、形状才是
+  /** M7：左键按住猫身拖窗口。挂在根 `<svg>` 上，`.hei-cat` 是 `pointer-events:none`、形状才是
    *  `visiblePainted`，所以事件只从**画出来的形状**冒泡上来（SCOPE §7 的"仅绘制形状可命中"）。 */
   onMouseDown?: (event: ReactMouseEvent<SVGSVGElement>) => void;
   /** M7：右键弹原生菜单「退出」。同样只在猫身上触发；透明区交给 M6 的穿透。 */

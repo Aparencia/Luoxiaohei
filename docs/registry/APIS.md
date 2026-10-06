@@ -26,7 +26,7 @@
 | 错误码 | 含义 | 现象 | 处置（代码写法定死） | 门禁拦截点 |
 | :-- | :-- | :-- | :-- | :-- |
 | `E-IPC-01` | capability 缺条目，ACL 拒绝该命令 | `invoke` 返回 rejected Promise | 不吞错：`console.error('[ipc] E-IPC-01 <命令名>', err)`；功能失效由门禁拦，不靠运行时兜底 | `src/tauriConfig.test.ts` 的 `acl OK 4/4` 用例 |
-| `E-IPC-02` | 光标 / 显示器信息不可用（`cursorPosition()` / `currentMonitor()` 返回 `null`） | Promise **resolved 为** `null`，不抛错 | 瞳孔回正 0°；穿透开关保持上一次取值；不重试、不写盘 | `src/interaction/gaze.test.ts` 与 `hitTest.test.ts` 的 `null` 入参用例 |
+| `E-IPC-02` | 光标 / 显示器信息不可用（`cursorPosition()` 取不到值；`currentMonitor()` 返回 `null`） | **rejection**：`cursorPosition()` 内部 `new PhysicalPosition(null)` 抛 `TypeError: Cannot use 'in' operator …`（`@tauri-apps/api` v2.12.1 本机实测）；上游哪天修好了会回到契约原文的形态（Promise **resolved 为** `null`）——**两种形态都归本码**（4-2 的 S-03 勘误，原表只写了后者） | 瞳孔回正 0°、幅度 0；穿透开关保持上一次取值；不重试、不写盘。`readCursorScreen()` **同时挡两种形态**，判据用 `instanceof TypeError` 而不是比字符串——ACL 拒绝抛的是 Rust 给的字符串（那是 `E-IPC-01`），两者混起来 KP-14 会空转 | `src/interaction/dragExit.test.ts` 的 **KP-13**（真封装 + mock 回 `null`，实测就是这条 TypeError）；`gaze.test.ts` / `hitTest.test.ts` 的 `null` 入参用例只覆盖纯函数侧 |
 | `E-IPC-03` | 窗口生命周期末端的调用（`close()` 之后仍有 tick 排队） | rejected Promise | 忽略（`close()` 是最后一动作，进程随即退出） | 无（不可达路径；4-2 审查核对"`close()` 后不再写状态"） |
 
 ## 约定

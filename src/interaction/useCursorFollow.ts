@@ -57,20 +57,56 @@ const NEUTRAL: CursorFollow = {
  */
 export type WindowGeometry = { origin: Point; center: Point; scaleFactor: number };
 
+/** `cursor_position` 的命令名：失败报告与恢复报告必须用**同一个键**，否则去重表会分裂成两条。 */
+const CURSOR_POSITION = "plugin:window|cursor_position";
+
 /**
- * E-IPC-01：这条链路断了。写清"发生了什么 + 那条命令 + 怎么办"（docs/UI.md §8 的错误模板）。
+ * E-IPC-01 的报告人。写清"发生了什么 + 那条命令 + 怎么办"（docs/UI.md §8 的错误模板）。
  * 三个 interaction 模块共用这一处落点（D12 信息阶梯：错误码的格式只写一遍），`command` 由调用方
  * 点名——`plugin:window|cursor_position` / `plugin:window|set_ignore_cursor_events` /
  * `plugin:window|close` 断掉的样子完全不同，痕迹里没有命令名就没人知道该查哪条链。
+ *
+ * **去重口径** = `docs/UI.md` §2 的 S3 行：「同一处连续失败只打第一次（防 60 次/秒刷屏）、
+ * 恢复后再失败才再打」。60Hz tick 逐拍调它，不去重就是每秒 60 行同一条，真实后续报错被冲掉
+ * （4-2 的 S-06）。去重必须**成对**：只压不解除 = 一次抖动之后这条链路永久静音。
+ * 状态住在工厂闭包而不是模块级变量（D14① 禁隐式全局），`write` 显式传入 → Node 用例能把条数数出来。
  */
-export const reportIpcFailure = (command: string, error: unknown): void => {
-  console.error(
-    `[ipc] E-IPC-01 ${command} 被拒绝或桥不可用：${String(error)}。` +
-      `功能停在当前取值上，不重试、不假装成功。排查：src-tauri/capabilities/default.json 必须含 core:default` +
-      `（其 core:window:default 提供 allow-cursor-position / allow-outer-position / allow-inner-size / allow-current-monitor），` +
-      `写命令另需三条具名授权：allow-close / allow-start-dragging / allow-set-ignore-cursor-events，菜单需 core:menu:default。`,
-  );
+export type IpcFailureReporter = {
+  reportFailure: (command: string, error: unknown) => void;
+  /** 成功一拍：解除该命令的静音（下一次再失败会重新打印）。 */
+  noteSuccess: (command: string) => void;
 };
+
+export const createIpcFailureReporter = (
+  // ⚠️ 默认值必须是**箭头函数**而不是 `console.error` 本身：捕获函数引用会让 `t.mock.method(console, …)`
+  // 这类替身失效（KP-14 就是这么数痕迹条数的）——每次调用都要现取 `console.error`。
+  write: (line: string) => void = (line) => console.error(line),
+): IpcFailureReporter => {
+  const muted = new Set<string>();
+  return {
+    reportFailure: (command, error) => {
+      if (muted.has(command)) return;
+      muted.add(command);
+      write(
+        `[ipc] E-IPC-01 ${command} 被拒绝或桥不可用：${String(error)}。` +
+          `功能停在当前取值上，不重试、不假装成功。排查：src-tauri/capabilities/default.json 必须含 core:default` +
+          `（其 core:window:default 提供 allow-cursor-position / allow-outer-position / allow-inner-size / allow-current-monitor），` +
+          `写命令另需三条具名授权：allow-close / allow-start-dragging / allow-set-ignore-cursor-events，菜单需 core:menu:default。`,
+      );
+    },
+    noteSuccess: (command) => {
+      muted.delete(command);
+    },
+  };
+};
+
+const defaultReporter = createIpcFailureReporter();
+
+/** 三个 interaction 模块共用的失败落点（`useDragExit` / `usePointerPassthrough` 也 import 它）。 */
+export const reportIpcFailure = defaultReporter.reportFailure;
+
+/** 恢复落点：成功的那一拍解除静音，本身不打印。 */
+export const noteIpcSuccess = defaultReporter.noteSuccess;
 
 /** 不在 Tauri 里（浏览器直开、Node 单测）时 `getCurrentWindow()` 会抛——按"取不到几何"处理，不崩。 */
 const currentWindowOrNull = (): Window | null => {
@@ -154,6 +190,8 @@ export function useCursorFollow(enabled: boolean): CursorFollow {
       void readGeometry(win)
         .then((next) => {
           if (alive) geometry.current = next;
+          // 成功就解除静音：读几何失败过一次之后，恢复的那一拍必须让下一次失败重新可见（UI.md S3）
+          noteIpcSuccess(GEOMETRY_COMMANDS);
         })
         .catch((error) => reportIpcFailure(GEOMETRY_COMMANDS, error));
     };
@@ -183,6 +221,7 @@ export function useCursorFollow(enabled: boolean): CursorFollow {
     const tick = (): void => {
       void sampleCursor(geometry.current)
         .then((next) => {
+          noteIpcSuccess(CURSOR_POSITION); // 恢复一拍就解除静音（只压不解除 = 一次抖动之后永久静音）
           const prev = latest.current;
           // 窗口原点与缩放也算"值"：窗口被拖动时同一屏幕坐标会落到不同的视口点，
           // 漏掉这两项 = 穿透判定拿旧原点算（拖动那几帧点错地方）
@@ -198,7 +237,7 @@ export function useCursorFollow(enabled: boolean): CursorFollow {
           latest.current = next;
           setState(next);
         })
-        .catch((error) => reportIpcFailure("plugin:window|cursor_position", error));
+        .catch((error) => reportIpcFailure(CURSOR_POSITION, error));
     };
     const timer = setInterval(tick, 1000 / SAMPLE_HZ);
     return () => clearInterval(timer);

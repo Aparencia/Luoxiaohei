@@ -3,7 +3,7 @@
 # 用法（在项目根）：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/nfr.ps1 -Check perf
 #   -Check 取值：perf | capacity | availability | security | maintainability | compat | all
-#   可选：-Seconds 60（CPU 采样秒数）、-Hours 8（长跑浸泡小时数）、-Launches 100（启停次数）
+#   可选：-Seconds 60（CPU 采样秒数）、-Hours 8（长跑浸泡小时数）、-Launches 100（启停循环次数；**给了才跑 A2**）
 #
 # 退出码：0 = 本维全部阈值通过；1 = 有阈值不达标；2 = 环境不满足（产物/进程缺失 → 没法测，**不是通过**）
 #
@@ -295,6 +295,14 @@ if ($Check -eq 'all' -or $Check -eq 'security') { Check-Security }
 if ($Check -eq 'all' -or $Check -eq 'perf') { Check-Perf }
 if ($Check -eq 'all' -or $Check -eq 'capacity') { Check-Capacity }
 if ($Check -eq 'all' -or $Check -eq 'availability') { Check-Availability }
+# A2 的启停循环（NFR.md:48）：只有**显式给了 -Launches** 才跑——与 -Hours / -Minutes 同一形态（不传 = 不跑那条阈值）。
+# 4-2 的 S-01：这个开关以前不存在——A2 的检查器**定义了却没有调用点**，而 NFR.md:48/91 把 A2 的验证动作
+# 写成 `-Check availability -Launches 100` ⇒ 照它跑只会执行长跑浸泡、打印「本维全部阈值通过」并 exit 0，
+# A2 从未被测量却拿到绿色（假绿）。接线后同一命令会真的跑 100 次启停，并打印「启动/退出循环的失败次数」那一行。
+# ⚠️ 这段注释刻意**不写那个函数名**：`orphans.ps1` 的「零引用导出」判据扫全文，注释里提一次
+# 就等于把这条机械判据关掉。实测过一次（同类坑见 STATE.md 风险摘要 ㊶/㊸）：注释里写了名字之后，
+# 把下面这行接线删掉，判据仍然报「零引用导出 0 项」——判据被自己的注释满足了。
+if (($Check -eq 'all' -or $Check -eq 'availability') -and $PSBoundParameters.ContainsKey('Launches')) { Check-LaunchCycle }
 
 if ($Check -ne 'availability') { Say 'i' '关闭本次启动的应用实例（按进程树，含 WebView2 子进程）'; Stop-App }
 

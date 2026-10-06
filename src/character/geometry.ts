@@ -16,9 +16,28 @@
 
 export type Point = { x: number; y: number };
 export type Ellipse = { cx: number; cy: number; rx: number; ry: number };
-/** 命中粗筛用的轴对齐矩形，单位 CSS px（= 设计坐标 × `DESIGN_TO_CSS`）。 */
-export type Bounds = { x: number; y: number; width: number; height: number };
-export type EarShape = { rootX: number; rootY: number; tipX: number; tipY: number; pathD: string };
+/**
+ * 命中形状（单位 CSS px）——**不是一个矩形**。4-2 的 R-01 实测「头含耳一个大矩形」的死区达
+ * 窗口面积的 9.9%，所以头用椭圆、耳用三角形（两者本来就是精确几何体），只有形状方正的
+ * 躯干与尾段仍用矩形。判定住在 `src/interaction/hitTest.ts` 的 `isOverCharacter()`。
+ */
+export type Bounds =
+  | { shape: "rect"; x: number; y: number; width: number; height: number }
+  | { shape: "ellipse"; cx: number; cy: number; rx: number; ry: number }
+  | { shape: "triangle"; a: Point; b: Point; c: Point };
+/**
+ * 一只耳 = 一个三角形（耳尖 / 外底角 / 内底角），设计坐标。
+ * `pathD` 与命中盒都由这三个点**现算**——手抄第二份坐标迟早漂移（4-2 的 R-01 就是靠这几个点
+ * 才可能把耳盒切得贴近三角形；改回"一个外接矩形"死区立刻涨 3 倍）。
+ */
+export type EarShape = {
+  rootX: number;
+  rootY: number;
+  tip: Point;
+  outer: Point;
+  inner: Point;
+  pathD: string;
+};
 export type EyeLidShape = Ellipse & { pathD: string };
 export type TorsoShape = {
   topY: number;
@@ -39,8 +58,10 @@ export type TailShape = {
  * 设计坐标 → CSS px 的缩放。SVG 的 `width:100%` 让它铺满窗口宽 260 CSS px（`tauri.conf.json`
  * 的 `app.windows[0].width`），而 `VIEW_BOX` 宽 320 → 260 ÷ 320 = 0.8125，高相应 360 × 0.8125 = 292.5，
  * 窗口 300 高 − 292.5 = **底部余 7.5px**（SCOPE §7 写"留 8px"是取整表述，3-5 卡已登记）。
+ * 导出是 4-2 的 S-12 要求的：窗口宽这个事实写在两处（配置 + 这个常量），导出后测试才能把两者绑住
+ * （`geometry.test.ts` M3·⑥ 断言 `DESIGN_TO_CSS === WINDOW.width / 320`）。
  */
-const DESIGN_TO_CSS = 260 / 320;
+export const DESIGN_TO_CSS = 260 / 320;
 
 /** 设计坐标系（DESIGN_TOKENS §10）：`'0 0 320 360'`。3-5 卡勘误原值 `'0 0 260 300'`——照原值身体底沿 y=352 会被裁掉脚。 */
 export const VIEW_BOX = "0 0 320 360";
@@ -55,11 +76,22 @@ const HEAD: Ellipse = { cx: 160, cy: 140, rx: 100, ry: 92 };
 const EAR_TIP_Y = 24;
 /** 耳根中心的 y 由头部椭圆推出：140 − 92×√(1−(60/100)²) = 66.4 → 取 66（往头里埋 0.4px，防接缝漏光）。 */
 const EAR_ROOT_Y = 66;
+/**
+ * 一只耳 = 一个三角形；`pathD` 由这三个点现算（一只耳只有一份坐标，D12）。
+ * 底边两角刻意落在头部椭圆**内部**（(75,95) 与 (125,82) 都在椭圆里）：由后画的头盖住，
+ * 露出来的那段边界正好是头的弧线 → 耳朵看起来是"从头里长出来的"，而不是贴上去的三角片。
+ */
+const ear = (rootX: number, tip: Point, outer: Point, inner: Point): EarShape => ({
+  rootX,
+  rootY: EAR_ROOT_Y,
+  tip,
+  outer,
+  inner,
+  pathD: `M${fmt(outer.x)} ${fmt(outer.y)} L${fmt(tip.x)} ${fmt(tip.y)} L${fmt(inner.x)} ${fmt(inner.y)} Z`,
+});
 const EARS: [EarShape, EarShape] = [
-  // 底边两角刻意落在头部椭圆**内部**（(75,95) 与 (125,82) 都在椭圆里）：由后画的头盖住，
-  // 露出来的那段边界正好是头的弧线 → 耳朵看起来是"从头里长出来的"，而不是贴上去的三角片。
-  { rootX: 100, rootY: EAR_ROOT_Y, tipX: 96, tipY: EAR_TIP_Y, pathD: "M75 95 L96 24 L125 82 Z" },
-  { rootX: 220, rootY: EAR_ROOT_Y, tipX: 224, tipY: EAR_TIP_Y, pathD: "M245 95 L224 24 L195 82 Z" },
+  ear(100, at(96, EAR_TIP_Y), at(75, 95), at(125, 82)),
+  ear(220, at(224, EAR_TIP_Y), at(245, 95), at(195, 82)),
 ];
 
 // ── 眼睛（同一张表：两眼中心 x=113/207、y=136、rx45/ry52；瞳孔 rx32/ry41、相对眼心 (+2,+4)）──────
@@ -80,7 +112,11 @@ const PUPILS: [Ellipse, Ellipse] = [
 
 /**
  * 瞳孔能走多远（SCOPE §7 元素表原文："距中心最大偏移 = 眼白短半径的 45%"）。
- * 眼白短半径 = `ry` = 52 → 满偏 23.4（设计坐标）；乘上 `gazeTravel`（0~1）才是实时位移。
+ * 眼白 `rx = 45` / `ry = 52`，**短半径 = `rx` = 45** → 满偏 20.25（设计坐标）；乘上 `gazeTravel`（0~1）
+ * 才是实时位移。
+ * ⚠️ 4-2 的 R-02：第一版取的是 `ry`（=52，满偏 23.4，多走 15.6%）——注释当时还写着"短半径 = ry"，
+ * 把长短读反了；而 `pupilOffsetFor` 当时**零测试引用**，所以这条幅度判据没人守（现已由 M5·⑩ 兜住）。
+ * 顺带量到：瞳孔 `ry = 41` + 23.4 = 64.4 > 眼白 `ry = 52` ⇒ 用 ry 时满偏会画出眼白轮廓之外。
  */
 export const PUPIL_TRAVEL_RATIO = 0.45;
 
@@ -93,7 +129,7 @@ export const PUPIL_TRAVEL_RATIO = 0.45;
 export function pupilOffsetFor(gazeDeg: number, gazeTravel: number): Point {
   const deg = Number.isFinite(gazeDeg) ? gazeDeg : 0;
   const travel = Number.isFinite(gazeTravel) ? Math.min(1, Math.max(0, gazeTravel)) : 0;
-  const radius = PUPIL_TRAVEL_RATIO * EYE_RY * travel;
+  const radius = PUPIL_TRAVEL_RATIO * EYE_RX * travel;
   const rad = (deg * Math.PI) / 180;
   return { x: radius * Math.cos(rad), y: radius * Math.sin(rad) };
 }
@@ -220,45 +256,55 @@ export const CAT_GEOMETRY = {
   tail: TAIL,
 };
 
-/** 命中粗筛盒（批次 4 的 `isOverCharacter` 消费）：头+耳 1 个 / 躯干 1 个 / 尾巴 6 个。 */
-export function characterBounds(): Bounds[] {
-  /** 描边可见半宽（设计坐标）：`stroke-width` 4 有一半被填充盖住，所以只多出 2。 */
-  const rimHalf = 2;
-  const box = (x0: number, y0: number, x1: number, y1: number): Bounds => {
-    const left = Math.floor(x0 * DESIGN_TO_CSS);
-    const top = Math.floor(y0 * DESIGN_TO_CSS);
-    // 向外取整：粗筛盒只许多盖、不许漏盖（漏一条边 = 猫身上有像素不响应拖拽）
-    return {
-      x: left,
-      y: top,
-      width: Math.ceil(x1 * DESIGN_TO_CSS) - left,
-      height: Math.ceil(y1 * DESIGN_TO_CSS) - top,
-    };
+/** 描边可见半宽（设计坐标）：`stroke-width` 4 有一半被填充盖住，所以只多出 2。 */
+const RIM_HALF = 2;
+
+/** 设计坐标 → CSS px（只做比例换算；外扩各形状自己加）。 */
+const css = (design: number): number => design * DESIGN_TO_CSS;
+
+/** 顶点沿"顶点 → 重心"方向外扩 `by`（设计坐标）：描边有一半画在填充之外，不扩就漏一条边。 */
+const dilateTriangle = (t: EarShape, by: number): { a: Point; b: Point; c: Point } => {
+  const v = [t.tip, t.outer, t.inner];
+  const centroid = at((v[0].x + v[1].x + v[2].x) / 3, (v[0].y + v[1].y + v[2].y) / 3);
+  const out = v.map((p) => {
+    const dx = p.x - centroid.x;
+    const dy = p.y - centroid.y;
+    const len = Math.hypot(dx, dy) || 1;
+    return at(p.x + (dx / len) * by, p.y + (dy / len) * by);
+  });
+  return { a: out[0], b: out[1], c: out[2] };
+};
+
+/** 设计坐标的外接矩形 → **向外取整**的 CSS px 矩形盒（躯干与尾段用）。 */
+const rectBox = (x0: number, y0: number, x1: number, y1: number): Bounds => {
+  const left = Math.floor(x0 * DESIGN_TO_CSS);
+  const top = Math.floor(y0 * DESIGN_TO_CSS);
+  // 向外取整：只许多盖、不许漏盖（漏一条边 = 猫身上有像素不响应拖拽）
+  return {
+    shape: "rect",
+    x: left,
+    y: top,
+    width: Math.ceil(x1 * DESIGN_TO_CSS) - left,
+    height: Math.ceil(y1 * DESIGN_TO_CSS) - top,
   };
+};
 
-  const bounds: Bounds[] = [
-    // 头含耳：耳朵最外沿 x 75/245 落在头部椭圆的 x 60..260 之内，只需再并上耳尖的 y
-    box(HEAD.cx - HEAD.rx, EAR_TIP_Y, HEAD.cx + HEAD.rx, HEAD.cy + HEAD.ry),
-    box(
-      HEAD.cx - TORSO.bottomHalfWidth,
-      TORSO.topY,
-      HEAD.cx + TORSO.bottomHalfWidth,
-      TORSO.bottomY,
-    ),
-  ];
-
-  // 尾巴不是一根直棍（它贴着右边缘兜回来）：一个大盒会把"尾巴弯里那块透明区"整块吃掉 →
-  // 沿中心线切成 6 段、每段一个小盒（批次 4 的命中判定就靠这个精度）
-  const tailBoxes = 6;
+/**
+ * 尾巴的命中盒：尾巴不是一根直棍（它贴着右边缘兜回来），一个大盒会把"尾巴弯里那块透明区"
+ * 整块吃掉 → 沿中心线切成 6 段、每段一个小盒。
+ */
+const tailBoxes = (): Bounds[] => {
+  const out: Bounds[] = [];
+  const slices = 6;
   const last = TAIL_CENTER.length - 1;
-  for (let i = 0; i < tailBoxes; i++) {
-    const from = Math.floor((i * last) / tailBoxes);
-    const to = Math.floor(((i + 1) * last) / tailBoxes);
+  for (let i = 0; i < slices; i++) {
+    const from = Math.floor((i * last) / slices);
+    const to = Math.floor(((i + 1) * last) / slices);
     const slice = TAIL_CENTER.slice(from, to + 1);
     // 用段**起点**的半宽（尾巴越往上越细）→ 取到该段里最宽的那一档，宁可多盖
-    const half = TAIL_ROOT_HALF + (TAIL_TIP_HALF - TAIL_ROOT_HALF) * (from / last) + rimHalf;
-    bounds.push(
-      box(
+    const half = TAIL_ROOT_HALF + (TAIL_TIP_HALF - TAIL_ROOT_HALF) * (from / last) + RIM_HALF;
+    out.push(
+      rectBox(
         Math.min(...slice.map((p) => p.x)) - half,
         Math.min(...slice.map((p) => p.y)) - half,
         Math.max(...slice.map((p) => p.x)) + half,
@@ -266,5 +312,48 @@ export function characterBounds(): Bounds[] {
       ),
     );
   }
-  return bounds;
+  return out;
+};
+
+/**
+ * 猫身的命中形状（批次 4 的 `isOverCharacter` 消费；批次 5 按 4-2 的 R-01 改成**精确形状**）：
+ * 头 1 个椭圆 + 耳 2 个三角形 + 躯干 1 个矩形 + 尾 6 个矩形 = **10 个**。
+ *
+ * 为什么不是"头含耳一个大矩形"：第一版就是那么写的（`x 48..212 / y 19..189`），实测死区
+ * **7740 CSS px² = 窗口面积 9.9%**——头顶上方那条带、两耳之间的空隙、椭圆四角全都什么都没画，
+ * 落在它们上面既点不到背后的桌面图标、也拖不动猫（SCOPE §5 M6 的用户故事在那片像素上不成立），
+ * 而旧探针的四个取样点全在盒外，拦不住。头与耳**本来就是精确几何体**（一个椭圆 + 两个三角形），
+ * 把它们退化成矩形是白丢精度；躯干与尾段仍用矩形——那两块盒内基本是实心的（尾巴那 6 段就是为此切的）。
+ * 每个形状都向外扩 `RIM_HALF`：描边有一半画在填充之外，不扩就漏一圈约 1.6 CSS px 的边缘。
+ * 三个部件各自成函数是为了守住 D14① 的函数 ≤50 行——改形状时本函数一度涨到 75 行。
+ */
+export function characterBounds(): Bounds[] {
+  const rim = css(RIM_HALF);
+  const head: Bounds = {
+    shape: "ellipse",
+    cx: css(HEAD.cx),
+    cy: css(HEAD.cy),
+    rx: css(HEAD.rx) + rim,
+    ry: css(HEAD.ry) + rim,
+  };
+  const ears = EARS.map((e): Bounds => {
+    const t = dilateTriangle(e, RIM_HALF);
+    return {
+      shape: "triangle",
+      a: at(css(t.a.x), css(t.a.y)),
+      b: at(css(t.b.x), css(t.b.y)),
+      c: at(css(t.c.x), css(t.c.y)),
+    };
+  });
+  return [
+    head,
+    ...ears,
+    rectBox(
+      HEAD.cx - TORSO.bottomHalfWidth,
+      TORSO.topY,
+      HEAD.cx + TORSO.bottomHalfWidth,
+      TORSO.bottomY,
+    ),
+    ...tailBoxes(),
+  ];
 }
