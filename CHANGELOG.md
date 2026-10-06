@@ -10,7 +10,8 @@
 
 - 项目初始化：Tauri 2 + React 19 + TypeScript 桌面应用骨架（选型见 `docs/decisions/STACK_2026-10-06_桌面摆件技术栈.md`）
 - Roadbook V6 流程骨架：`AGENTS.md` 宪法、`STATE.md` 状态源、`docs/` 文档地图、五个守护脚本
-- 角色形象调研结论与设计参数（配色 / 比例）落 `docs/DESIGN_TOKENS.md`
+- 角色形象基准（通体漆黑 / 圆头圆脑 / 眼白占全脸约 2/3 / 黑瞳 / 长尾）落 `docs/specs/2026-10-06_desktop-pet/SCOPE.md` §8——**改自原「落 docs/DESIGN_TOKENS.md」一句**：色值、比例、间距是 3-5 卡产物，当前仅有骨架，原文属未兑现的声明
+- MVP 需求边界与验收标准就绪：`docs/specs/2026-10-06_desktop-pet/SCOPE.md`（Must 8 / Should 5 / Could 5 / Won't 14；**待用户确认**）
 
 ### 变更
 
