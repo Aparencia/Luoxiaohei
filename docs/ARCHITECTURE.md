@@ -32,23 +32,37 @@ graph TD
 - 本项目已合并掉接口层 / 数据层：无服务端、无数据库，故两行按「删比留空准」删除。
 - **路径一律写全**：本文件写裸文件名（如只写 `main.rs`）会被 `orphans.ps1` 判为「文档幽灵」——搜索词要能一次命中真实文件。
 
-## 3. 数据流（3-1 卡写方案时填；三行讲清一个典型请求）
+## 3. 数据流（3-1 卡定；两条真实链路，逐行都是本项目的名字）
 
-1. 用户操作 → 界面层发请求（写出真实入口与参数）
-2. 接口层校验 → 业务层处理 → 数据层读写
-3. 返回 → 界面层渲染；错误 → 统一错误码（registry/APIS.md）
+**链路 A · 光标跟随与透明区穿透（每 16.7 ms 一次，全项目唯一的定时器）**
 
-- 三行都要出现真实接口名/字段名，不写"某接口""相关表"。
+1. `src/interaction/useCursorFollow.ts` 的 `setInterval` 触发 → `invoke('plugin:window|cursor_position')`（无参数，返回 `{x,y}` 或 `null`）→ 得到 `cursorScreen`
+2. 同一个 tick 内：`gazeAngle(dx, dy)`（`src/interaction/gaze.ts`）算出 `gazeDeg`；`screenToViewport()` + `isOverCharacter()`（`src/interaction/hitTest.ts`，几何取自 `src/character/geometry.ts` 的 `CAT_GEOMETRY`）算出 `overCharacter`
+3. 写回界面层：`gazeDeg` 变化才写进 CSS 自定义属性驱动瞳孔；`overCharacter` 在**翻转时**才 `invoke('plugin:window|set_ignore_cursor_events', {label, value})`
+4. 失败分支：`cursor_position` 返回 `null` → 瞳孔回正 0°、穿透开关保持上一次取值（错误码 `E-IPC-02`，见 `docs/registry/APIS.md`）
+
+**链路 B · 用户操作（事件驱动，无轮询）**
+
+1. 左键 `mousedown` 命中猫身 → `useDragExit.onMouseDown` → `invoke('plugin:window|start_dragging', {label:'main'})`（阻塞式，SCOPE U4）
+2. 右键 `contextmenu` → `Menu.new()` + `MenuItem.new('退出')`（`plugin:menu|new`）→ `popup()`（`plugin:menu|popup`）
+3. 菜单项 onClick → `invoke('plugin:window|close', {label:'main'})` → 窗口关闭、进程退出
+4. 失败分支：ACL 未授权 → Promise reject → `console.error` 打 `E-IPC-01`，**功能失效由门禁拦**（`src/tauriConfig.test.ts` 的 `acl OK 4/4`），不靠运行时兜底
+
+- 本项目**无数据层、无接口层**：链路里没有数据库读写、没有 HTTP 往返。全部状态是进程内瞬时值（`docs/specs/2026-10-06_desktop-pet/DESIGN.md` §2）。
 
 ## 4. 新代码落点表（3-1 卡定方案时填；新建文件前必查，找不到就问，禁止乱放）
 
 | 改动类型 | 放哪 |
 | :-- | :-- |
-| 新界面代码（组件 / 样式 / 角色渲染） | `src/`（角色与动画建议独立子目录，由 2-1/3-1 卡定名） |
+| 角色渲染与动画（SVG 组件 / 几何常量 / keyframes 样式） | `src/character/`（**3-1 卡定名**：`HeiCat.tsx` / `geometry.ts` / `heicat.css`；动画一律合成层属性） |
+| 交互逻辑与 hook（抽样、命中、拖拽退出） | `src/interaction/`（**3-1 卡定名**：纯函数 `gaze.ts` / `hitTest.ts` 与 hook 分文件；纯函数不得 import `.tsx`） |
+| 装配层（把角色与 hook 拼起来） | `src/App.tsx`（唯一装配点；hook 的返回值为参数传给下一个 hook，不许各自直连全局） |
 | 新窗口控制命令（Rust） | `src-tauri/src/`（命令注册进 `src-tauri/src/lib.rs`） |
-| 新静态素材 | `public/` |
+| 新静态素材 | `public/`（**本项目禁止入库任何位图形象素材**，NFR `security` S5：入库的官方素材数 = 0） |
 | 新脚本 / 工具 | `scripts/`（**2026-10-06 已建立**；2-4 卡登记第 1 个：`scripts/nfr.ps1` = 六维非功能阈值的检查命令，`-Check <perf\|capacity\|availability\|security\|maintainability\|compat\|all>`；新脚本一律先在此登记再落盘） |
-| 窗口 / 打包配置 | `src-tauri/tauri.conf.json` |
+| 窗口 / 打包配置 | `src-tauri/tauri.conf.json`（3-1 卡定下 6 个键的终值，见 `DESIGN.md` §3.4） |
+| 能力授权 | `src-tauri/capabilities/default.json`（3-1 卡定下 5 条，上限也是 5；加授权必须同批加调用方，删调用方必须同批删授权） |
+| 测试文件 | 与被测模块同目录、同名前缀（`*.test.ts`），由 `node --test "src/**/*.test.ts"` 收集 |
 | 环境变量 | `.env`（真实值）/ `.env.example`（键名）——本项目当前无需任何环境变量 |
 
 - 已删除两行（无对应物）：「新接口」「新表/字段」——本项目无服务端、无数据库。
@@ -75,6 +89,16 @@ graph TD
 | 不得使用 WebView2 在 Windows 10 1809 上不支持的特性（本机是 154，但目标下限是 1809 随附版本） | 兼容 `compat` Windows build ≥17763 | 界面层 `src/` |
 | 单文件 ≤500 行（测试文件 ≤1000 行）→ 角色、动画样式、交互 hook 必须分文件，禁止堆进 `src/App.tsx` | 可维护 `maintainability` | 界面层 `src/` |
 | 应用**不写任何用户目录文件**（不建日志、不建缓存）；若启用 SCOPE S1「位置记忆」，只允许 `localStorage` 一个坐标 | 容量 `capacity` + 安全 `security` | 界面层 `src/interaction/useDragExit.ts` |
+
+**3-1 卡定下的模块约束（设计批准后生效；4-2 代码审查按此复核）：**
+
+| 约束 | 来自 | 落到哪个模块 |
+| :-- | :-- | :-- |
+| 全项目**只允许一个** 60Hz 定时器；`usePointerPassthrough` 不得自采样，只能消费 `useCursorFollow` 的同一 tick | ARCHITECTURE §5（2-4）+ NFR `perf` P1 | `src/interaction/useCursorFollow.ts`、`src/interaction/usePointerPassthrough.ts` |
+| 60Hz 链路上的 IPC **只在值翻转时**调用（`set_ignore_cursor_events` 于 `overCharacter` 翻转时；瞳孔属性于角度变化时），不得逐帧无条件 invoke | NFR `perf` P1 空闲 CPU ≤1% | 同上两个 hook |
+| 纯函数（`gaze.ts` / `hitTest.ts`）**不得 import `.tsx`**；几何常量必须住在非 JSX 文件，供纯逻辑与测试共用 | D14① 纯逻辑与副作用分文件 | `src/character/geometry.ts` → `src/interaction/hitTest.ts` |
+| 每条 IPC 调用的失败分支必须显式处理，错误码取 APIS.md 的 `E-IPC-01/02/03`；**禁空 catch、禁静默吞错** | D14④ 防御 | `src/interaction/*.ts` |
+| capability 授权条目与代码里的实际调用**必须一一对应**（既有 ≤5 条上限，也有"不留未被调用的授权"下限） | NFR `security` S2 | `src-tauri/capabilities/default.json` ↔ `src/interaction/` |
 
 ## 6. 边界三问（3-7 卡动作 1；项目首次成型或结构变更时填）
 
