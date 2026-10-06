@@ -27,6 +27,7 @@
 | Rust 依赖锁定（**生成物**） | "Rust 依赖的锁定清单" | — | src-tauri/Cargo.lock | `name = "tauri"` | 首次 `npm run tauri build -- --no-bundle` 生成（锁定 458 个 crate 的版本）；**不是新增依赖**；N/A（无个人数据）；N/A | 2026-10-06 |
 
 <!-- 生成物为什么也登记：DOC_MAP.json 的 new-file 判据按路径机械判定，生成物一样会命中；不登记 = 门禁判红（2-4 卡实测） -->
+<!-- 2026-10-06 2-4 卡：src-tauri/Cargo.lock 以独立提交入库（chore(deps)）。它 4897 行，属**生成物**，不受 500 行手写上限约束；gate.ps1 对生成物无豁免通道，故该批次门禁仍红 —— 缺口登记在 docs/TECH_DEBT.md TD-001 -->
 
 ## 「影响面 / 非功能标注」两列怎么写（4-1 卡每批登记时填；7-1 卡改 UI 时复核）
 
